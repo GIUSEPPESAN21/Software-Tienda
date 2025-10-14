@@ -504,7 +504,7 @@ elif st.session_state.page == "📊 Analítica":
 # ----------------------------------
 elif st.session_state.page == "👥 Acerca de":
     # El código de esta página no cambia
-    st.header("Sobre el Proyecto y sus Creadores")
+    st.header("Sobre el Proyecto y su Creador")
     with st.container(border=True):
         col_img_est, col_info_est = st.columns([1, 3])
         with col_img_est:
@@ -520,4 +520,5 @@ elif st.session_state.page == "👥 Acerca de":
                 - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
                 """
             )
+
 
