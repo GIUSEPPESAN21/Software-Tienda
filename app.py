@@ -357,27 +357,35 @@ elif st.session_state.page == "🛒 Pedidos":
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("📝 Crear Nuevo Pedido")
+
+        # --- GESTIÓN DE ARTÍCULOS (FUERA DEL FORMULARIO) ---
+        st.markdown("**Artículos del Pedido:**")
+        # Lógica para añadir ingredientes dinámicamente
+        for i in range(len(st.session_state.order_ingredients)):
+            c1, c2, c3 = st.columns([4, 2, 1])
+            # Usamos el índice de la lista de llaves para el selectbox
+            inventory_names = list(inventory.keys())
+            st.session_state.order_ingredients[i]['name'] = c1.selectbox(f"Artículo {i+1}", inventory_names, key=f"ing_name_{i}")
+            st.session_state.order_ingredients[i]['quantity'] = c2.number_input("Cantidad", min_value=1, key=f"ing_qty_{i}")
+            if c3.button("🗑️", key=f"del_ing_{i}"):
+                st.session_state.order_ingredients.pop(i)
+                st.rerun()
+        
+        if st.button("➕ Añadir Artículo al Pedido"):
+            st.session_state.order_ingredients.append({'name': list(inventory.keys())[0] if inventory else '', 'quantity': 1})
+            st.rerun()
+        
+        st.markdown("---")
+
+        # --- FORMULARIO PARA DATOS FINALES Y ENVÍO ---
         with st.form("order_form"):
             title = st.text_input("Nombre o Título del Pedido")
             price = st.number_input("Precio de Venta ($)", min_value=0.01, format="%.2f")
             
-            st.markdown("**Artículos del Pedido:**")
-            
-            # Lógica para añadir ingredientes dinámicamente
-            for i in range(len(st.session_state.order_ingredients)):
-                c1,c2,c3 = st.columns([4,2,1])
-                st.session_state.order_ingredients[i]['name'] = c1.selectbox(f"Artículo {i+1}", list(inventory.keys()), key=f"ing_name_{i}")
-                st.session_state.order_ingredients[i]['quantity'] = c2.number_input("Cantidad", min_value=1, key=f"ing_qty_{i}")
-                if c3.button("🗑️", key=f"del_ing_{i}"):
-                    st.session_state.order_ingredients.pop(i)
-                    st.rerun()
-
-            if st.button("➕ Añadir Artículo al Pedido"):
-                st.session_state.order_ingredients.append({'name': '', 'quantity': 1})
-                st.rerun()
-
-            if st.form_submit_button("Crear Pedido", type="primary", use_container_width=True):
+            submitted = st.form_submit_button("Crear Pedido", type="primary", use_container_width=True)
+            if submitted:
                 valid_ings = []
+                # Validar ingredientes desde el estado de sesión al momento del envío
                 for ing in st.session_state.order_ingredients:
                     if ing['name'] and inventory[ing['name']]['quantity'] >= ing['quantity']:
                         valid_ings.append({'id': inventory[ing['name']]['id'], 'name': ing['name'], 'quantity': ing['quantity']})
@@ -491,5 +499,6 @@ elif st.session_state.page == "👥 Acerca de":
                 - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
                 """
             )
+
 
 
