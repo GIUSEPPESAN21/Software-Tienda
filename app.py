@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.2 - Flujos de Trabajo Inteligentes y Estructura Restaurada
+Versión 3.3 - Flujos de Trabajo Inteligentes y Estructura Restaurada
 """
 import streamlit as st
 from PIL import Image
@@ -90,7 +90,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.2")
+st.sidebar.title("HI-DRIVE 3.3")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -172,14 +172,11 @@ elif st.session_state.page == "📸 Análisis IA":
             
             if detections.boxes:
                 st.subheader("Selecciona un objeto para analizarlo en detalle:")
-                
-                # Crear columnas dinámicamente
                 num_detections = len(detections.boxes)
                 cols = st.columns(num_detections)
 
                 for i, box in enumerate(detections.boxes):
                     class_name = detections.names[box.cls[0].item()]
-                    # Usar la columna correspondiente
                     with cols[i]:
                         if st.button(f"Analizar '{class_name}' #{i+1}", use_container_width=True, key=f"analyze_{i}"):
                             with st.spinner("🤖 Gemini está analizando el recorte..."):
@@ -203,11 +200,19 @@ elif st.session_state.page == "📸 Análisis IA":
                     item = firebase.get_inventory_item_details(code_data)
                     if item:
                         st.subheader("✔️ ¡Artículo Encontrado!")
-                        st.json(item)
+                        # --- INICIO DE LA CORRECCIÓN VISUAL ---
+                        st.markdown(f"""
+                        - **Nombre:** `{item.get('name', 'N/A')}`
+                        - **Stock Actual:** `{item.get('quantity', 0)}`
+                        - **Precio de Venta:** `${item.get('sale_price', 0):,.2f}`
+                        - **Precio de Compra:** `${item.get('purchase_price', 0):,.2f}`
+                        - **Proveedor:** `{item.get('supplier_name', 'No asignado')}`
+                        """)
+                        # --- FIN DE LA CORRECCIÓN VISUAL ---
                     else:
                         st.info("Este código no corresponde a ningún artículo. Puede agregarlo desde la sección de Inventario.")
 
-    # --- MEJORA: Flujo de Vinculación con la Base de Datos ---
+    # --- Flujo de Vinculación con la Base de Datos ---
     if st.session_state.analysis_results and "error" not in st.session_state.analysis_results:
         st.subheader("✔️ Resultado del Análisis de Gemini")
         res = st.session_state.analysis_results
@@ -296,6 +301,32 @@ elif st.session_state.page == "📦 Inventario":
                     st.success(f"Artículo '{name}' guardado.")
                 else:
                     st.warning("ID y Nombre son obligatorios.")
+                    
+# ----------------------------------
+# PÁGINA: PROVEEDORES
+# ----------------------------------
+elif st.session_state.page == "👥 Proveedores":
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        with st.form("add_supplier_form", clear_on_submit=True):
+            st.subheader("Añadir Proveedor")
+            name = st.text_input("Nombre del Proveedor")
+            contact = st.text_input("Persona de Contacto")
+            email = st.text_input("Email")
+            phone = st.text_input("Teléfono")
+            if st.form_submit_button("Guardar", type="primary", use_container_width=True):
+                if name:
+                    firebase.add_supplier({"name": name, "contact_person": contact, "email": email, "phone": phone})
+                    st.success(f"Proveedor '{name}' añadido.")
+                    st.rerun()
+    with col2:
+        st.subheader("Lista de Proveedores")
+        suppliers = firebase.get_all_suppliers()
+        for s in suppliers:
+            with st.expander(f"**{s['name']}**"):
+                st.write(f"**Contacto:** {s.get('contact_person', 'N/A')}")
+                st.write(f"**Email:** {s.get('email', 'N/A')}")
+                st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
 # ----------------------------------
 # PÁGINA: PEDIDOS
@@ -373,19 +404,104 @@ elif st.session_state.page == "🛒 Pedidos":
     processing_orders = firebase.get_orders('processing')
     if not processing_orders:
         st.info("No hay pedidos en proceso.")
-    for order in processing_orders:
-        with st.expander(f"**{order['title']}** - ${order.get('price', 0):,.2f}"):
-            # ... (Lógica para completar o cancelar se mantiene igual) ...
-            pass
+    else:
+        for order in processing_orders:
+            with st.expander(f"**{order['title']}** - ${order.get('price', 0):,.2f}"):
+                st.write("Artículos:")
+                for item in order.get('ingredients', []):
+                    st.write(f"- {item.get('name')} (x{item.get('quantity')})")
+                
+                c1, c2 = st.columns(2)
+                if c1.button("✅ Completar Pedido", key=f"comp_{order['id']}", type="primary", use_container_width=True):
+                    success, msg, alerts = firebase.complete_order(order['id'])
+                    if success:
+                        st.success(msg)
+                        send_whatsapp_alert(f"✅ Pedido Completado: {order['title']}")
+                        for alert in alerts: send_whatsapp_alert(f"📉 ALERTA DE STOCK: {alert}")
+                        st.rerun()
+                    else: st.error(msg)
+                if c2.button("❌ Cancelar Pedido", key=f"canc_{order['id']}", use_container_width=True):
+                    firebase.cancel_order(order['id']); st.rerun()
 
-# --- (Resto de las páginas se mantienen sin cambios significativos) ---
-elif st.session_state.page == "👥 Proveedores":
-    # ...
-    pass
+# ----------------------------------
+# PÁGINA: ANALÍTICA
+# ----------------------------------
 elif st.session_state.page == "📊 Analítica":
-    # ...
-    pass
+    tab1, tab2, tab3 = st.tabs(["💰 Rendimiento Financiero", "🔄 Rotación de Inventario", "📈 Predicción de Demanda"])
+    
+    completed_orders = firebase.get_orders('completed')
+    if not completed_orders:
+        st.info("No hay pedidos completados para generar analíticas.")
+    else:
+        with tab1:
+            total_revenue = sum(o.get('price', 0) for o in completed_orders)
+            total_cogs = sum(ing.get('purchase_price', 0) * ing.get('quantity', 0) for o in completed_orders for ing in o.get('ingredients', []))
+            gross_profit = total_revenue - total_cogs
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Ingresos Totales", f"${total_revenue:,.2f}")
+            c2.metric("Costo de Ventas (COGS)", f"${total_cogs:,.2f}")
+            c3.metric("Beneficio Bruto", f"${gross_profit:,.2f}")
+
+        with tab2:
+            all_items_sold = [ing for o in completed_orders for ing in o.get('ingredients', [])]
+            item_sales = {}
+            for item in all_items_sold:
+                item_sales[item['name']] = item_sales.get(item['name'], 0) + item['quantity']
+            
+            df_sales = pd.DataFrame(list(item_sales.items()), columns=['Artículo', 'Unidades Vendidas']).sort_values('Unidades Vendidas', ascending=False)
+            
+            st.subheader("Top 10 - Artículos Más Vendidos")
+            st.dataframe(df_sales.head(10), hide_index=True)
+
+            fig = px.bar(df_sales.head(10), x='Artículo', y='Unidades Vendidas', title="Rendimiento de Artículos")
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab3:
+            st.subheader("Predecir Demanda Futura de un Artículo")
+            inventory_items = firebase.get_all_inventory_items()
+            item_names = [item['name'] for item in inventory_items if 'name' in item]
+            item_to_predict = st.selectbox("Selecciona un artículo:", item_names)
+
+            if item_to_predict:
+                sales_history = []
+                for order in completed_orders:
+                    for item in order.get('ingredients', []):
+                        if item.get('name') == item_to_predict:
+                            sales_history.append({'date': order['timestamp_obj'], 'quantity': item['quantity']})
+                
+                if len(sales_history) < 5: # Aumentado para mayor fiabilidad
+                    st.warning("No hay suficientes datos de ventas para este artículo para hacer una predicción fiable.")
+                else:
+                    df_hist = pd.DataFrame(sales_history)
+                    df_hist['date'] = pd.to_datetime(df_hist['date'])
+                    df_hist = df_hist.set_index('date').resample('D').sum().fillna(0)
+
+                    try:
+                        model = ExponentialSmoothing(df_hist['quantity'], seasonal='add', seasonal_periods=7).fit()
+                        prediction = model.forecast(30)
+                        st.success(f"Se estima una demanda de **{int(prediction.sum())} unidades** para los próximos 30 días.")
+                        st.line_chart(prediction)
+                    except Exception as e:
+                        st.error(f"No se pudo generar la predicción: {e}")
+# ----------------------------------
+# PÁGINA: ACERCA DE
+# ----------------------------------
 elif st.session_state.page == "👥 Acerca de":
-    # ...
-    pass
+    st.header("Sobre el Proyecto y sus Creadores")
+    with st.container(border=True):
+        col_img_est, col_info_est = st.columns([1, 3])
+        with col_img_est:
+            st.image("https://avatars.githubusercontent.com/u/129755299?v=4", width=200, caption="Joseph Javier Sánchez Acuña")
+        with col_info_est:
+            st.title("Joseph Javier Sánchez Acuña")
+            st.subheader("Estudiante de Ingeniería Industrial")
+            st.subheader("Experto en Inteligencia Artificial y Desarrollo de Software.")
+            st.markdown(
+                """
+                - **LinkedIn:** [joseph-javier-sánchez-acuña](https://www.linkedin.com/in/joseph-javier-sánchez-acuña-150410275)
+                - **GitHub:** [GIUSEPPESAN21](https://github.com/GIUSEPPESAN21)
+                - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
+                """
+            )
 
