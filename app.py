@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.11 - Escáner de Pedidos Potenciado
+Versión 3.11 - Corrección de Error de Renderizado (Keys Estables)
 """
 import streamlit as st
 from PIL import Image
@@ -72,6 +72,7 @@ def init_session_state():
         'order_items': [],
         'analysis_results': None,
         'editing_item_id': None,
+        'scanned_item': None
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -105,6 +106,7 @@ for page_name, icon in PAGES.items():
         st.session_state.page = page_name
         st.session_state.analysis_results = None
         st.session_state.editing_item_id = None
+        st.session_state.scanned_item = None
         st.rerun()
 
 st.sidebar.markdown("---")
@@ -324,7 +326,7 @@ elif st.session_state.page == "👥 Proveedores":
                 st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
 # ----------------------------------
-# PÁGINA: PEDIDOS (VERSIÓN POTENCIADA)
+# PÁGINA: PEDIDOS
 # ----------------------------------
 elif st.session_state.page == "🛒 Pedidos":
     items_from_db = firebase.get_all_inventory_items()
@@ -341,48 +343,31 @@ elif st.session_state.page == "🛒 Pedidos":
             selected_name = st.selectbox("Selecciona un artículo", options)
             if selected_name and st.button("Añadir al Pedido"):
                 item_to_add = inventory_by_name[selected_name]
-                # Lógica para actualizar cantidad si ya existe
-                existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == item_to_add['id']), None)
-                if existing_item_index is not None:
-                    st.session_state.order_items[existing_item_index]['order_quantity'] += 1
-                else:
-                    st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
+                st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
                 st.rerun()
 
-        # --- INICIO DE LA MEJORA: ESCÁNER MÁS POTENTE ---
         elif add_method == "Escáner de Código":
-            st.info("El escáner está activo. Cada código detectado se añadirá o actualizará automáticamente.")
-            barcode_img = st.camera_input("Apunta la cámara a uno o varios códigos", key="order_scanner")
-            
+            barcode_img = st.camera_input("Apunta al código de barras", key="order_scanner")
             if barcode_img:
-                with st.spinner("Procesando imagen..."):
-                    decoded_objects = decode(Image.open(barcode_img))
-                    if not decoded_objects:
-                        st.warning("No se detectaron códigos en la imagen.")
+                decoded_objects = decode(Image.open(barcode_img))
+                if decoded_objects:
+                    code = decoded_objects[0].data.decode('utf-8')
+                    if code in inventory_by_id:
+                        st.session_state.scanned_item = inventory_by_id[code]
+                        st.rerun()
                     else:
-                        items_changed = False
-                        for obj in decoded_objects:
-                            code = obj.data.decode('utf-8')
-                            if code in inventory_by_id:
-                                item_to_add = inventory_by_id[code]
-                                # Verificar si el artículo ya está en el pedido
-                                existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == code), None)
-                                
-                                if existing_item_index is not None:
-                                    # Si ya existe, incrementar la cantidad
-                                    st.session_state.order_items[existing_item_index]['order_quantity'] += 1
-                                    st.toast(f"Cantidad de '{item_to_add['name']}' actualizada.", icon="🔄")
-                                else:
-                                    # Si es nuevo, añadirlo a la lista
-                                    st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
-                                    st.toast(f"'{item_to_add['name']}' añadido al pedido.", icon="✅")
-                                items_changed = True
-                            else:
-                                st.error(f"El código '{code}' no se encontró en el inventario.")
-                        
-                        if items_changed:
-                            st.rerun() # Recargar la página una sola vez al final
-        # --- FIN DE LA MEJORA ---
+                        st.error(f"El código '{code}' no se encontró en el inventario.")
+                        st.session_state.scanned_item = None
+            
+            if st.session_state.scanned_item:
+                item = st.session_state.scanned_item
+                st.success(f"Artículo escaneado: **{item['name']}**")
+                quantity_to_add = st.number_input("Cantidad a añadir:", min_value=1, value=1, key="scanned_qty")
+                
+                if st.button("Confirmar y Añadir al Pedido", type="primary"):
+                    st.session_state.order_items.append(dict(item, **{'order_quantity': quantity_to_add}))
+                    st.session_state.scanned_item = None
+                    st.rerun()
 
     with col2:
         st.subheader("Detalle del Pedido Actual")
@@ -390,19 +375,35 @@ elif st.session_state.page == "🛒 Pedidos":
             st.info("Añade artículos para comenzar un pedido.")
         else:
             total_price = 0
+            
+            # --- INICIO DE LA CORRECCIÓN ---
+            # Se necesita una copia para iterar mientras se modifica la lista original
+            items_to_remove_indices = []
             for i, item in enumerate(st.session_state.order_items):
                 c1, c2, c3, c4 = st.columns([4,2,2,1])
                 c1.text(item['name'])
+                
+                # Usar una llave única y estable basada en el ID del producto y su posición
                 item_id = item.get('id', f'item_{i}')
+                
                 new_qty = c2.number_input("Cantidad", value=item['order_quantity'], min_value=1, key=f"qty_{item_id}_{i}")
                 st.session_state.order_items[i]['order_quantity'] = new_qty
+                
                 item_total = item.get('sale_price', 0) * new_qty
                 c3.text(f"${item_total:,.2f}")
                 total_price += item_total
+                
                 if c4.button("🗑️", key=f"del_{item_id}_{i}"):
-                    st.session_state.order_items.pop(i)
-                    st.rerun()
-            
+                    # Marcar el índice para ser eliminado después del bucle
+                    items_to_remove_indices.append(i)
+
+            # Eliminar los ítems marcados, en orden inverso para no afectar los índices
+            if items_to_remove_indices:
+                for index in sorted(items_to_remove_indices, reverse=True):
+                    st.session_state.order_items.pop(index)
+                st.rerun()
+            # --- FIN DE LA CORRECCIÓN ---
+
             st.metric("Precio Total del Pedido", f"${total_price:,.2f}")
             
             order_count = firebase.get_order_count()
