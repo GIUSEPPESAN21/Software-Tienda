@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.11 - Corrección de Error de Renderizado (Keys Estables)
+Versión 3.12 - Corrección de Error de Fechas (Timezone)
 """
 import streamlit as st
 from PIL import Image
 import pandas as pd
 import plotly.express as px
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # <-- Se ha añadido timezone
 
 # --- Importaciones de utilidades y modelos ---
 try:
@@ -95,7 +95,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.11")
+st.sidebar.title("HI-DRIVE 3.12")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -376,33 +376,23 @@ elif st.session_state.page == "🛒 Pedidos":
         else:
             total_price = 0
             
-            # --- INICIO DE LA CORRECCIÓN ---
-            # Se necesita una copia para iterar mientras se modifica la lista original
             items_to_remove_indices = []
             for i, item in enumerate(st.session_state.order_items):
                 c1, c2, c3, c4 = st.columns([4,2,2,1])
                 c1.text(item['name'])
-                
-                # Usar una llave única y estable basada en el ID del producto y su posición
                 item_id = item.get('id', f'item_{i}')
-                
                 new_qty = c2.number_input("Cantidad", value=item['order_quantity'], min_value=1, key=f"qty_{item_id}_{i}")
                 st.session_state.order_items[i]['order_quantity'] = new_qty
-                
                 item_total = item.get('sale_price', 0) * new_qty
                 c3.text(f"${item_total:,.2f}")
                 total_price += item_total
-                
                 if c4.button("🗑️", key=f"del_{item_id}_{i}"):
-                    # Marcar el índice para ser eliminado después del bucle
                     items_to_remove_indices.append(i)
 
-            # Eliminar los ítems marcados, en orden inverso para no afectar los índices
             if items_to_remove_indices:
                 for index in sorted(items_to_remove_indices, reverse=True):
                     st.session_state.order_items.pop(index)
                 st.rerun()
-            # --- FIN DE LA CORRECCIÓN ---
 
             st.metric("Precio Total del Pedido", f"${total_price:,.2f}")
             
@@ -475,9 +465,11 @@ elif st.session_state.page == "📊 Analítica":
             st.subheader("Tendencia de Ingresos y Beneficios Diarios")
             sales_data = []
             for order in completed_orders:
-                if 'timestamp_obj' in order:
+                # --- INICIO DE LA CORRECCIÓN ---
+                if 'timestamp_obj' in order and order['timestamp_obj'] is not None:
                     order_profit = order.get('price', 0) - sum(ing.get('purchase_price', 0) * ing.get('quantity', 0) for ing in order.get('ingredients', []))
                     sales_data.append({'Fecha': order['timestamp_obj'].date(), 'Ingresos': order.get('price', 0), 'Beneficios': order_profit})
+            # --- FIN DE LA CORRECCIÓN ---
             if sales_data:
                 df_trends = pd.DataFrame(sales_data).groupby('Fecha').sum()
                 st.line_chart(df_trends)
@@ -506,9 +498,14 @@ elif st.session_state.page == "📊 Analítica":
                 st.dataframe(df_profits.head(5), hide_index=True)
             st.markdown("---")
             st.subheader("Inventario de Lenta Rotación (no vendido en los últimos 30 días)")
-            thirty_days_ago = datetime.now() - timedelta(days=30)
+            
+            # --- INICIO DE LA CORRECCIÓN ---
+            thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+            # --- FIN DE LA CORRECCIÓN ---
+            
             sold_item_ids = {ing['id'] for o in completed_orders if o.get('timestamp_obj') and o['timestamp_obj'] > thirty_days_ago for ing in o.get('ingredients', [])}
             slow_moving_items = [item for item in all_inventory_items if item['id'] not in sold_item_ids]
+            
             if not slow_moving_items:
                 st.success("¡Todos los artículos han tenido movimiento en los últimos 30 días!")
             else:
