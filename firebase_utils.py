@@ -184,9 +184,33 @@ class FirebaseManager:
                 query = query.where(filter=firestore.FieldFilter('status', '==', status))
             
             docs = query.stream()
-            orders = [dict(order.to_dict(), **{'id': order.id}) for order in docs]
+            orders = []
+            for doc in docs:
+                order = doc.to_dict()
+                order['id'] = doc.id
+                
+                # --- INICIO DE LA CORRECCIÓN ---
+                # Estandarizar el campo de la fecha antes de ordenar
+                ts = order.get('timestamp')
+                if isinstance(ts, str):
+                    try:
+                        # Intentar convertir el string a un objeto datetime
+                        order['timestamp_obj'] = datetime.fromisoformat(ts)
+                    except (ValueError, TypeError):
+                        # Si falla la conversión, usar una fecha muy antigua por defecto
+                        order['timestamp_obj'] = datetime.min
+                elif isinstance(ts, datetime):
+                    # Si ya es un objeto datetime, simplemente usarlo
+                    order['timestamp_obj'] = ts
+                else:
+                    # Si no existe o es de otro tipo, usar el valor por defecto
+                    order['timestamp_obj'] = datetime.min
+                # --- FIN DE LA CORRECCIÓN ---
+                
+                orders.append(order)
             
-            orders.sort(key=lambda x: x.get('timestamp', datetime.min), reverse=True)
+            # Ordenar usando el nuevo campo que garantizamos que es de tipo datetime
+            orders.sort(key=lambda x: x['timestamp_obj'], reverse=True)
             
             return orders
         except Exception as e:
