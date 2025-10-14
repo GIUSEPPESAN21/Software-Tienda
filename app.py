@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.6 - Módulo de Analítica Mejorado
+Versión 3.7 - Corrección de Error en Analítica y Mejoras de Inventario
 """
 import streamlit as st
 from PIL import Image
@@ -94,7 +94,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.6")
+st.sidebar.title("HI-DRIVE 3.7")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -436,10 +436,17 @@ elif st.session_state.page == "📊 Analítica":
             st.subheader("Tendencia de Ingresos y Beneficios Diarios")
             sales_data = []
             for order in completed_orders:
-                order_profit = order.get('price', 0) - sum(ing.get('purchase_price', 0) * ing.get('quantity', 0) for ing in order.get('ingredients', []))
-                sales_data.append({'Fecha': order['timestamp_obj'].date(), 'Ingresos': order.get('price', 0), 'Beneficios': order_profit})
-            df_trends = pd.DataFrame(sales_data).groupby('Fecha').sum()
-            st.line_chart(df_trends)
+                # --- INICIO DE LA CORRECCIÓN ---
+                if 'timestamp_obj' in order:
+                    order_profit = order.get('price', 0) - sum(ing.get('purchase_price', 0) * ing.get('quantity', 0) for ing in order.get('ingredients', []))
+                    sales_data.append({'Fecha': order['timestamp_obj'].date(), 'Ingresos': order.get('price', 0), 'Beneficios': order_profit})
+                # --- FIN DE LA CORRECCIÓN ---
+            if sales_data:
+                df_trends = pd.DataFrame(sales_data).groupby('Fecha').sum()
+                st.line_chart(df_trends)
+            else:
+                st.warning("No hay suficientes datos de fecha para generar un gráfico de tendencias.")
+
         with tab2:
             all_items_sold = [ing for o in completed_orders for ing in o.get('ingredients', [])]
             item_sales = {item['name']: item_sales.get(item['name'], 0) + item['quantity'] for item in all_items_sold}
@@ -456,7 +463,7 @@ elif st.session_state.page == "📊 Analítica":
             st.markdown("---")
             st.subheader("Inventario de Lenta Rotación (no vendido en los últimos 30 días)")
             thirty_days_ago = datetime.now() - timedelta(days=30)
-            sold_item_ids = {ing['id'] for o in completed_orders if o['timestamp_obj'] > thirty_days_ago for ing in o.get('ingredients', [])}
+            sold_item_ids = {ing['id'] for o in completed_orders if o.get('timestamp_obj') and o['timestamp_obj'] > thirty_days_ago for ing in o.get('ingredients', [])}
             slow_moving_items = [item for item in all_inventory_items if item['id'] not in sold_item_ids]
             if not slow_moving_items:
                 st.success("¡Todos los artículos han tenido movimiento en los últimos 30 días!")
