@@ -345,7 +345,14 @@ elif st.session_state.page == "👥 Proveedores":
 # PÁGINA: PEDIDOS
 # ----------------------------------
 elif st.session_state.page == "🛒 Pedidos":
-    inventory = {item['name']: {'id': item['id'], 'quantity': item['quantity']} for item in firebase.get_all_inventory_items()}
+    items_from_db = firebase.get_all_inventory_items()
+    inventory = {
+        item['name']: {
+            'id': item.get('id'), 
+            'quantity': item.get('quantity', 0)
+        } 
+        for item in items_from_db if 'name' in item and item.get('name')
+    }
     
     col1, col2 = st.columns(2)
     with col1:
@@ -484,4 +491,5 @@ elif st.session_state.page == "👥 Acerca de":
                 - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
                 """
             )
+
 
