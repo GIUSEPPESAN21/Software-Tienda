@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.4 - Módulo de Inventario Mejorado
+Versión 3.5 - Corrección Final y Mejoras de Inventario
 """
 import streamlit as st
 from PIL import Image
@@ -79,6 +79,7 @@ def init_session_state():
 
 init_session_state()
 
+
 # --- LÓGICA DE NOTIFICACIONES ---
 def send_whatsapp_alert(message):
     if not twilio_client:
@@ -93,7 +94,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.4")
+st.sidebar.title("HI-DRIVE 3.5")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -102,7 +103,7 @@ PAGES = {
 for page_name, icon in PAGES.items():
     if st.sidebar.button(f"{page_name}", use_container_width=True, type="primary" if st.session_state.page == page_name else "secondary"):
         st.session_state.page = page_name
-        st.session_state.analysis_results = None 
+        st.session_state.analysis_results = None
         st.session_state.editing_item_id = None
         st.rerun()
 
@@ -118,13 +119,14 @@ st.markdown("<hr>", unsafe_allow_html=True)
 # PÁGINA: INICIO
 # ----------------------------------
 if st.session_state.page == "🏠 Inicio":
-    # El código de esta página no cambia
     st.subheader("Plataforma de gestión inteligente para un control total sobre su inventario.")
+    
     try:
         items = firebase.get_all_inventory_items()
         orders = firebase.get_orders(status=None)
         suppliers = firebase.get_all_suppliers()
         total_inventory_value = sum(item.get('quantity', 0) * item.get('purchase_price', 0) for item in items)
+        
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("📦 Artículos Únicos", len(items))
         c2.metric("💰 Valor del Inventario", f"${total_inventory_value:,.2f}")
@@ -132,7 +134,9 @@ if st.session_state.page == "🏠 Inicio":
         c4.metric("👥 Proveedores", len(suppliers))
     except Exception as e:
         st.warning(f"No se pudieron cargar las estadísticas: {e}")
+    
     st.markdown("---")
+    
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Acciones Rápidas")
@@ -153,13 +157,16 @@ if st.session_state.page == "🏠 Inicio":
 # PÁGINA: ANÁLISIS IA
 # ----------------------------------
 elif st.session_state.page == "📸 Análisis IA":
-    # El código de esta página no cambia
     st.info("Detecta múltiples objetos, elige cuál analizar y vincúlalo a tu inventario, o usa el escáner para una identificación instantánea.")
+    
     source_options = ["🧠 Detección de Objetos", "║█║ Escáner de Código"]
     img_source = st.selectbox("Selecciona el modo de análisis:", source_options)
+
     img_buffer = st.camera_input("Apunta la cámara al objetivo", key="ia_camera")
+
     if img_buffer:
         pil_image = Image.open(img_buffer)
+
         if img_source == "🧠 Detección de Objetos":
             with st.spinner("Detectando objetos con IA Local..."):
                 results = yolo(pil_image)
@@ -167,25 +174,23 @@ elif st.session_state.page == "📸 Análisis IA":
             detections = results[0]
             if detections.boxes:
                 st.subheader("Selecciona un objeto para analizarlo en detalle:")
-                num_detections = len(detections.boxes)
-                cols = st.columns(num_detections)
+                cols = st.columns(len(detections.boxes))
                 for i, box in enumerate(detections.boxes):
                     class_name = detections.names[box.cls[0].item()]
-                    with cols[i]:
-                        if st.button(f"Analizar '{class_name}' #{i+1}", use_container_width=True, key=f"analyze_{i}"):
-                            with st.spinner("🤖 Gemini está analizando el recorte..."):
-                                coords = box.xyxy[0].cpu().numpy().astype(int)
-                                cropped_pil_image = pil_image.crop(tuple(coords))
-                                analysis_json = gemini.analyze_image(cropped_pil_image, class_name)
-                                st.session_state.analysis_results = json.loads(analysis_json)
-                                st.rerun()
+                    if cols[i].button(f"Analizar '{class_name}' #{i+1}", use_container_width=True, key=f"analyze_{i}"):
+                        with st.spinner("🤖 Gemini está analizando el recorte..."):
+                            coords = box.xyxy[0].cpu().numpy().astype(int)
+                            analysis_json = gemini.analyze_image(pil_image.crop(tuple(coords)), class_name)
+                            st.session_state.analysis_results = json.loads(analysis_json)
+                            st.rerun()
             else:
                 st.warning("No se detectaron objetos conocidos en la imagen.")
+
         elif img_source == "║█║ Escáner de Código":
             with st.spinner("Buscando códigos..."):
                 decoded_objects = decode(pil_image)
                 if not decoded_objects:
-                    st.warning("No se encontraron códigos de barras o QR en la imagen.")
+                    st.warning("No se encontraron códigos de barras o QR.")
                 else:
                     code_data = decoded_objects[0].data.decode('utf-8')
                     st.success(f"Código detectado: **{code_data}**")
@@ -196,54 +201,51 @@ elif st.session_state.page == "📸 Análisis IA":
                         - **Nombre:** `{item.get('name', 'N/A')}`
                         - **Stock Actual:** `{item.get('quantity', 0)}`
                         - **Precio de Venta:** `${item.get('sale_price', 0):,.2f}`
-                        - **Precio de Compra:** `${item.get('purchase_price', 0):,.2f}`
                         - **Proveedor:** `{item.get('supplier_name', 'No asignado')}`
                         """)
                     else:
-                        st.info("Este código no corresponde a ningún artículo. Puede agregarlo desde la sección de Inventario.")
+                        st.info("Este código no corresponde a ningún artículo.")
+
     if st.session_state.analysis_results and "error" not in st.session_state.analysis_results:
-        st.subheader("✔️ Resultado del Análisis de Gemini")
         res = st.session_state.analysis_results
+        st.subheader("✔️ Resultado del Análisis de Gemini")
         st.markdown(f"""
         - **Producto:** {res.get('elemento_identificado', 'N/A')}
         - **Marca/Modelo:** {res.get('marca_modelo_sugerido', 'N/A')}
-        - **Categoría Sugerida:** {res.get('posible_categoria_de_inventario', 'N/A')}
         """)
         st.subheader("Vincular con Base de Datos")
         action = st.radio("Elige una acción:", ("Crear nuevo artículo", "Vincular a artículo existente"))
+        
         all_items = firebase.get_all_inventory_items()
         item_map = {item['name']: item['id'] for item in all_items}
+
         if action == "Crear nuevo artículo":
             with st.form("create_from_ia"):
-                st.write("Crea un nuevo registro en el inventario con la información de la IA.")
                 new_id = st.text_input("ID / SKU único", value=res.get('marca_modelo_sugerido', '').replace(" ", "-"))
                 new_name = st.text_input("Nombre del artículo", value=res.get('elemento_identificado'))
                 if st.form_submit_button("Crear Artículo", type="primary"):
-                    if new_id and new_name:
-                        if firebase.get_inventory_item_details(new_id):
-                            st.error(f"El ID '{new_id}' ya existe.")
-                        else:
-                            data = {"name": new_name, "analisis_ia": res}
-                            firebase.save_inventory_item(data, new_id, is_new=True)
-                            st.success(f"Artículo '{new_name}' creado con éxito.")
-                    else: st.warning("ID y Nombre son obligatorios.")
+                    if new_id and new_name and not firebase.get_inventory_item_details(new_id):
+                        data = {"name": new_name, "analisis_ia": res}
+                        firebase.save_inventory_item(data, new_id, is_new=True)
+                        st.success(f"Artículo '{new_name}' creado.")
+                    else:
+                        st.error("ID no válido o ya existente.")
+
         elif action == "Vincular a artículo existente":
             with st.form("link_from_ia"):
-                st.write("Añade la información de la IA a un artículo que ya existe en tu inventario.")
                 selected_item_name = st.selectbox("Selecciona el artículo a vincular", options=item_map.keys())
                 if st.form_submit_button("Vincular Información", type="primary"):
                     item_id = item_map.get(selected_item_name)
                     if item_id:
                         data = {"analisis_ia": res, "updated_at": datetime.now().isoformat()}
                         firebase.save_inventory_item(data, item_id, is_new=False)
-                        st.success(f"Información de IA vinculada a '{selected_item_name}'.")
+                        st.success(f"Información vinculada a '{selected_item_name}'.")
 
 # ----------------------------------
-# PÁGINA: INVENTARIO (VERSIÓN MEJORADA)
+# PÁGINA: INVENTARIO (CON EDICIÓN)
 # ----------------------------------
 elif st.session_state.page == "📦 Inventario":
     
-    # --- Vista de Edición (Modal) ---
     if st.session_state.editing_item_id:
         item_to_edit = firebase.get_inventory_item_details(st.session_state.editing_item_id)
         st.subheader(f"✏️ Editando: {item_to_edit.get('name')}")
@@ -257,35 +259,26 @@ elif st.session_state.page == "📦 Inventario":
 
             name = st.text_input("Nombre del Artículo", value=item_to_edit.get('name'))
             quantity = st.number_input("Cantidad Actual", value=item_to_edit.get('quantity', 0), min_value=0, step=1)
-            purchase_price = st.number_input("Costo de Compra ($)", value=item_to_edit.get('purchase_price', 0.0), min_value=0.0, format="%.2f")
-            sale_price = st.number_input("Precio de Venta ($)", value=item_to_edit.get('sale_price', 0.0), min_value=0.0, format="%.2f")
+            purchase_price = st.number_input("Costo de Compra ($)", value=item_to_edit.get('purchase_price', 0.0), format="%.2f")
+            sale_price = st.number_input("Precio de Venta ($)", value=item_to_edit.get('sale_price', 0.0), format="%.2f")
             min_stock_alert = st.number_input("Umbral de Alerta", value=item_to_edit.get('min_stock_alert', 0), min_value=0, step=1)
             selected_supplier_name = st.selectbox("Proveedor", supplier_names, index=current_supplier_index)
             
             c1, c2 = st.columns(2)
             if c1.form_submit_button("Guardar Cambios", type="primary", use_container_width=True):
                 if name:
-                    data = {
-                        "name": name, "quantity": quantity, "purchase_price": purchase_price, "sale_price": sale_price,
-                        "min_stock_alert": min_stock_alert,
-                        "supplier_id": supplier_map.get(selected_supplier_name),
-                        "supplier_name": selected_supplier_name, "updated_at": datetime.now().isoformat()
-                    }
+                    data = {"name": name, "quantity": quantity, "purchase_price": purchase_price, "sale_price": sale_price,
+                            "min_stock_alert": min_stock_alert, "supplier_id": supplier_map.get(selected_supplier_name),
+                            "supplier_name": selected_supplier_name, "updated_at": datetime.now().isoformat()}
                     firebase.save_inventory_item(data, st.session_state.editing_item_id, is_new=False)
                     st.success(f"Artículo '{name}' actualizado.")
                     st.session_state.editing_item_id = None
                     st.rerun()
-                else:
-                    st.warning("El nombre es obligatorio.")
-            
             if c2.form_submit_button("Cancelar", use_container_width=True):
-                st.session_state.editing_item_id = None
-                st.rerun()
+                st.session_state.editing_item_id = None; st.rerun()
 
-    # --- Vista Principal (Lista y Añadir) ---
     else:
         tab1, tab2 = st.tabs(["📋 Inventario Actual", "➕ Añadir Artículo"])
-
         with tab1:
             st.info("Haz clic en '✏️' en cualquier artículo para editar sus detalles.")
             items = firebase.get_all_inventory_items()
@@ -295,51 +288,38 @@ elif st.session_state.page == "📦 Inventario":
                 for item in items:
                     with st.container(border=True):
                         c1, c2, c3, c4 = st.columns([4, 2, 2, 1])
-                        with c1:
-                            st.markdown(f"**{item.get('name', 'N/A')}**")
-                            st.caption(f"ID: {item.get('id', 'N/A')}")
+                        c1.markdown(f"**{item.get('name', 'N/A')}**"); c1.caption(f"ID: {item.get('id', 'N/A')}")
                         c2.metric("Stock", item.get('quantity', 0))
                         c3.metric("Precio Venta", f"${item.get('sale_price', 0):,.2f}")
-                        with c4:
-                            st.markdown(" ") # Espaciador para alinear el botón
-                            if st.button("✏️", key=f"edit_{item['id']}", help="Editar este artículo"):
-                                st.session_state.editing_item_id = item['id']
-                                st.rerun()
+                        if c4.button("✏️", key=f"edit_{item['id']}", help="Editar este artículo"):
+                            st.session_state.editing_item_id = item['id']; st.rerun()
         with tab2:
             st.subheader("Añadir Nuevo Artículo al Inventario")
             suppliers = firebase.get_all_suppliers()
             supplier_map = {s['name']: s['id'] for s in suppliers}
-            
             with st.form("add_item_form_new"):
                 custom_id = st.text_input("ID Personalizado (SKU)")
                 name = st.text_input("Nombre del Artículo")
                 quantity = st.number_input("Cantidad Inicial", min_value=0, step=1)
                 purchase_price = st.number_input("Costo de Compra ($)", min_value=0.0, format="%.2f")
                 sale_price = st.number_input("Precio de Venta ($)", min_value=0.0, format="%.2f")
-                min_stock_alert = st.number_input("Umbral de Alerta de Stock Mínimo", min_value=0, step=1)
+                min_stock_alert = st.number_input("Umbral de Alerta", min_value=0, step=1)
                 selected_supplier_name = st.selectbox("Proveedor", [""] + list(supplier_map.keys()))
 
                 if st.form_submit_button("Guardar Nuevo Artículo", type="primary", use_container_width=True):
-                    if custom_id and name:
-                        if firebase.get_inventory_item_details(custom_id):
-                            st.error(f"¡Error! Ya existe un artículo con el ID '{custom_id}'.")
-                        else:
-                            data = {
-                                "name": name, "quantity": quantity, "purchase_price": purchase_price,
-                                "sale_price": sale_price, "min_stock_alert": min_stock_alert,
-                                "supplier_id": supplier_map.get(selected_supplier_name),
-                                "supplier_name": selected_supplier_name, "updated_at": datetime.now().isoformat()
-                            }
-                            firebase.save_inventory_item(data, custom_id, is_new=True)
-                            st.success(f"Artículo '{name}' guardado.")
+                    if custom_id and name and not firebase.get_inventory_item_details(custom_id):
+                        data = {"name": name, "quantity": quantity, "purchase_price": purchase_price, "sale_price": sale_price,
+                                "min_stock_alert": min_stock_alert, "supplier_id": supplier_map.get(selected_supplier_name),
+                                "supplier_name": selected_supplier_name, "updated_at": datetime.now().isoformat()}
+                        firebase.save_inventory_item(data, custom_id, is_new=True)
+                        st.success(f"Artículo '{name}' guardado.")
                     else:
-                        st.warning("ID y Nombre son obligatorios.")
-                    
+                        st.error("ID no válido, vacío o ya existente.")
+
 # ----------------------------------
-# PÁGINA: PROVEEDORES
+# PÁGINAS RESTANTES (SIN CAMBIOS)
 # ----------------------------------
 elif st.session_state.page == "👥 Proveedores":
-    # El código de esta página no cambia
     col1, col2 = st.columns([1, 2])
     with col1:
         with st.form("add_supplier_form", clear_on_submit=True):
@@ -362,14 +342,11 @@ elif st.session_state.page == "👥 Proveedores":
                 st.write(f"**Email:** {s.get('email', 'N/A')}")
                 st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
-# ----------------------------------
-# PÁGINA: PEDIDOS
-# ----------------------------------
 elif st.session_state.page == "🛒 Pedidos":
-    # El código de esta página no cambia
     items_from_db = firebase.get_all_inventory_items()
     inventory_by_id = {item['id']: item for item in items_from_db}
     inventory_by_name = {item['name']: item for item in items_from_db if 'name' in item}
+
     col1, col2 = st.columns([2, 3])
     with col1:
         st.subheader("Añadir Artículos al Pedido")
@@ -392,8 +369,8 @@ elif st.session_state.page == "🛒 Pedidos":
                         st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
                         st.success(f"'{item_to_add['name']}' añadido.")
                         st.rerun()
-                    else:
-                        st.error(f"El código '{code}' no se encontró en el inventario.")
+                    else: st.error(f"El código '{code}' no se encontró en el inventario.")
+
     with col2:
         st.subheader("Detalle del Pedido Actual")
         if not st.session_state.order_items:
@@ -410,9 +387,11 @@ elif st.session_state.page == "🛒 Pedidos":
                 total_price += item_total
                 if c4.button("🗑️", key=f"del_{i}"):
                     st.session_state.order_items.pop(i); st.rerun()
+            
             st.metric("Precio Total del Pedido", f"${total_price:,.2f}")
             order_count = firebase.get_order_count()
             default_title = f"Pedido #{order_count + 1}"
+
             with st.form("order_form"):
                 title = st.text_input("Nombre del Pedido (opcional)", placeholder=default_title)
                 final_title = title if title else default_title
@@ -422,8 +401,8 @@ elif st.session_state.page == "🛒 Pedidos":
                     firebase.create_order(order_data)
                     st.success(f"Pedido '{final_title}' creado con éxito.")
                     send_whatsapp_alert(f"🧾 Nuevo Pedido: {final_title} por ${total_price:,.2f}")
-                    st.session_state.order_items = []
-                    st.rerun()
+                    st.session_state.order_items = []; st.rerun()
+    
     st.markdown("---")
     st.subheader("⏳ Pedidos en Proceso")
     processing_orders = firebase.get_orders('processing')
@@ -439,19 +418,14 @@ elif st.session_state.page == "🛒 Pedidos":
                 if c1.button("✅ Completar Pedido", key=f"comp_{order['id']}", type="primary", use_container_width=True):
                     success, msg, alerts = firebase.complete_order(order['id'])
                     if success:
-                        st.success(msg)
-                        send_whatsapp_alert(f"✅ Pedido Completado: {order['title']}")
+                        st.success(msg); send_whatsapp_alert(f"✅ Pedido Completado: {order['title']}")
                         for alert in alerts: send_whatsapp_alert(f"📉 ALERTA DE STOCK: {alert}")
                         st.rerun()
                     else: st.error(msg)
                 if c2.button("❌ Cancelar Pedido", key=f"canc_{order['id']}", use_container_width=True):
                     firebase.cancel_order(order['id']); st.rerun()
 
-# ----------------------------------
-# PÁGINA: ANALÍTICA
-# ----------------------------------
 elif st.session_state.page == "📊 Analítica":
-    # El código de esta página no cambia
     tab1, tab2, tab3 = st.tabs(["💰 Rendimiento Financiero", "🔄 Rotación de Inventario", "📈 Predicción de Demanda"])
     completed_orders = firebase.get_orders('completed')
     if not completed_orders:
@@ -465,6 +439,7 @@ elif st.session_state.page == "📊 Analítica":
             c1.metric("Ingresos Totales", f"${total_revenue:,.2f}")
             c2.metric("Costo de Ventas (COGS)", f"${total_cogs:,.2f}")
             c3.metric("Beneficio Bruto", f"${gross_profit:,.2f}")
+
         with tab2:
             all_items_sold = [ing for o in completed_orders for ing in o.get('ingredients', [])]
             item_sales = {}
@@ -475,6 +450,7 @@ elif st.session_state.page == "📊 Analítica":
             st.dataframe(df_sales.head(10), hide_index=True)
             fig = px.bar(df_sales.head(10), x='Artículo', y='Unidades Vendidas', title="Rendimiento de Artículos")
             st.plotly_chart(fig, use_container_width=True)
+
         with tab3:
             st.subheader("Predecir Demanda Futura de un Artículo")
             inventory_items = firebase.get_all_inventory_items()
@@ -485,9 +461,12 @@ elif st.session_state.page == "📊 Analítica":
                 for order in completed_orders:
                     for item in order.get('ingredients', []):
                         if item.get('name') == item_to_predict:
-                            sales_history.append({'date': order['timestamp_obj'], 'quantity': item['quantity']})
-                if len(sales_history) < 5: 
-                    st.warning("No hay suficientes datos de ventas para este artículo para hacer una predicción fiable.")
+                            # CORRECCIÓN: Usar .get() para evitar KeyError
+                            if order.get('timestamp_obj'):
+                                sales_history.append({'date': order['timestamp_obj'], 'quantity': item['quantity']})
+                
+                if len(sales_history) < 5:
+                    st.warning("No hay suficientes datos de ventas para este artículo para una predicción fiable.")
                 else:
                     df_hist = pd.DataFrame(sales_history)
                     df_hist['date'] = pd.to_datetime(df_hist['date'])
@@ -499,12 +478,9 @@ elif st.session_state.page == "📊 Analítica":
                         st.line_chart(prediction)
                     except Exception as e:
                         st.error(f"No se pudo generar la predicción: {e}")
-# ----------------------------------
-# PÁGINA: ACERCA DE
-# ----------------------------------
+
 elif st.session_state.page == "👥 Acerca de":
-    # El código de esta página no cambia
-    st.header("Sobre el Proyecto y su Creador")
+    st.header("Sobre el Proyecto y sus Creadores")
     with st.container(border=True):
         col_img_est, col_info_est = st.columns([1, 3])
         with col_img_est:
@@ -520,5 +496,4 @@ elif st.session_state.page == "👥 Acerca de":
                 - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
                 """
             )
-
 
