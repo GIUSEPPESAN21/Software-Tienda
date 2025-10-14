@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.8 - Corrección de Error en Analítica
+Versión 3.9 - Flujo de Pedidos Mejorado y Corrección de Errores
 """
 import streamlit as st
 from PIL import Image
@@ -71,7 +71,8 @@ def init_session_state():
         'page': "🏠 Inicio",
         'order_items': [],
         'analysis_results': None,
-        'editing_item_id': None
+        'editing_item_id': None,
+        'scanned_item': None # Nuevo para el flujo de pedidos
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -94,7 +95,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.8")
+st.sidebar.title("HI-DRIVE 3.9")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -103,8 +104,10 @@ PAGES = {
 for page_name, icon in PAGES.items():
     if st.sidebar.button(f"{page_name}", use_container_width=True, type="primary" if st.session_state.page == page_name else "secondary"):
         st.session_state.page = page_name
+        # Limpiar estados específicos al cambiar de página para evitar datos residuales
         st.session_state.analysis_results = None
         st.session_state.editing_item_id = None
+        st.session_state.scanned_item = None
         st.rerun()
 
 st.sidebar.markdown("---")
@@ -330,10 +333,12 @@ elif st.session_state.page == "🛒 Pedidos":
     items_from_db = firebase.get_all_inventory_items()
     inventory_by_id = {item['id']: item for item in items_from_db}
     inventory_by_name = {item['name']: item for item in items_from_db if 'name' in item}
+    
     col1, col2 = st.columns([2, 3])
     with col1:
         st.subheader("Añadir Artículos al Pedido")
         add_method = st.radio("Método para añadir:", ("Manual", "Escáner de Código"))
+        
         if add_method == "Manual":
             options = [""] + list(inventory_by_name.keys())
             selected_name = st.selectbox("Selecciona un artículo", options)
@@ -341,6 +346,7 @@ elif st.session_state.page == "🛒 Pedidos":
                 item_to_add = inventory_by_name[selected_name]
                 st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
                 st.rerun()
+
         elif add_method == "Escáner de Código":
             barcode_img = st.camera_input("Apunta al código de barras", key="order_scanner")
             if barcode_img:
@@ -348,11 +354,23 @@ elif st.session_state.page == "🛒 Pedidos":
                 if decoded_objects:
                     code = decoded_objects[0].data.decode('utf-8')
                     if code in inventory_by_id:
-                        item_to_add = inventory_by_id[code]
-                        st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
-                        st.success(f"'{item_to_add['name']}' añadido.")
+                        st.session_state.scanned_item = inventory_by_id[code]
                         st.rerun()
-                    else: st.error(f"El código '{code}' no se encontró en el inventario.")
+                    else:
+                        st.error(f"El código '{code}' no se encontró en el inventario.")
+                        st.session_state.scanned_item = None # Limpiar por si acaso
+            
+            # --- NUEVO FLUJO: Confirmar cantidad del item escaneado ---
+            if st.session_state.scanned_item:
+                item = st.session_state.scanned_item
+                st.success(f"Artículo escaneado: **{item['name']}**")
+                quantity_to_add = st.number_input("Cantidad a añadir:", min_value=1, value=1, key="scanned_qty")
+                
+                if st.button("Confirmar y Añadir al Pedido", type="primary"):
+                    st.session_state.order_items.append(dict(item, **{'order_quantity': quantity_to_add}))
+                    st.session_state.scanned_item = None # Limpiar para el proximo escaneo
+                    st.rerun()
+
     with col2:
         st.subheader("Detalle del Pedido Actual")
         if not st.session_state.order_items:
@@ -369,12 +387,16 @@ elif st.session_state.page == "🛒 Pedidos":
                 total_price += item_total
                 if c4.button("🗑️", key=f"del_{i}"):
                     st.session_state.order_items.pop(i); st.rerun()
+            
             st.metric("Precio Total del Pedido", f"${total_price:,.2f}")
+            
             order_count = firebase.get_order_count()
             default_title = f"Pedido #{order_count + 1}"
+
             with st.form("order_form"):
                 title = st.text_input("Nombre del Pedido (opcional)", placeholder=default_title)
                 final_title = title if title else default_title
+                
                 if st.form_submit_button("Crear Pedido", type="primary", use_container_width=True):
                     ingredients = [{'id': item['id'], 'name': item['name'], 'quantity': item['order_quantity']} for item in st.session_state.order_items]
                     order_data = {'title': final_title, 'price': total_price, 'ingredients': ingredients, 'status': 'processing', 'timestamp': datetime.now()}
@@ -382,6 +404,7 @@ elif st.session_state.page == "🛒 Pedidos":
                     st.success(f"Pedido '{final_title}' creado con éxito.")
                     send_whatsapp_alert(f"🧾 Nuevo Pedido: {final_title} por ${total_price:,.2f}")
                     st.session_state.order_items = []; st.rerun()
+    
     st.markdown("---")
     st.subheader("⏳ Pedidos en Proceso")
     processing_orders = firebase.get_orders('processing')
@@ -448,15 +471,15 @@ elif st.session_state.page == "📊 Analítica":
         with tab2:
             all_items_sold = [ing for o in completed_orders for ing in o.get('ingredients', [])]
             
-            # --- INICIO DE LA CORRECCIÓN ---
+            # --- CORRECCIÓN: Bucle For tradicional para evitar NameError ---
             item_sales = {}
             for item in all_items_sold:
-                if 'name' in item: # Asegurarse que el item tiene nombre
+                if 'name' in item:
                     item_sales[item['name']] = item_sales.get(item['name'], 0) + item.get('quantity', 0)
             
             item_profits = {}
             for item in all_items_sold:
-                 if 'name' in item: # Asegurarse que el item tiene nombre
+                 if 'name' in item:
                     profit = (item.get('sale_price', item.get('purchase_price', 0)) - item.get('purchase_price', 0)) * item.get('quantity', 0)
                     item_profits[item['name']] = item_profits.get(item['name'], 0) + profit
             # --- FIN DE LA CORRECCIÓN ---
@@ -527,4 +550,3 @@ elif st.session_state.page == "👥 Acerca de":
                 - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
                 """
             )
-
