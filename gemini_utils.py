@@ -4,20 +4,16 @@ from PIL import Image
 import streamlit as st
 import json
 
-# Configurar logging para ver el proceso en la consola
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class GeminiUtils:
     def __init__(self):
-        # Obtener API key desde Streamlit secrets de forma segura
         self.api_key = st.secrets.get('GEMINI_API_KEY')
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY no encontrada en los secrets de Streamlit")
         
         genai.configure(api_key=self.api_key)
-        
-        # Inicializa el modelo usando el método robusto de selección con tu lista de modelos
         self.model = self._get_available_model()
     
     def _get_available_model(self):
@@ -36,46 +32,55 @@ class GeminiUtils:
         for model_name in model_candidates:
             try:
                 model = genai.GenerativeModel(model_name)
-                # Se realiza una pequeña prueba para asegurar que el modelo es compatible con imágenes
-                test_image = Image.new('RGB', (1, 1)) # Crea una imagen de 1x1 pixel
-                model.generate_content(["test", test_image])
-                logger.info(f"✅ Modelo de visión '{model_name}' inicializado y verificado con éxito.")
-                return model # Retorna el primer modelo que funcione
+                logger.info(f"✅ Modelo de visión '{model_name}' inicializado con éxito.")
+                return model
             except Exception as e:
                 logger.warning(f"⚠️ Modelo '{model_name}' no disponible o no compatible: {e}")
-                continue # Si falla, intenta con el siguiente de la lista
+                continue
         
-        # Si ningún modelo de la lista funciona, se lanza un error crítico.
-        raise Exception("No se pudo inicializar ningún modelo de visión de Gemini compatible. Verifica tu API Key y los modelos disponibles en tu cuenta.")
+        raise Exception("No se pudo inicializar ningún modelo de visión de Gemini compatible. Verifica tu API Key.")
     
     def analyze_image(self, image_pil: Image, description: str = ""):
         """
-        Analiza una imagen (en formato PIL) y devuelve una respuesta JSON estructurada y limpia.
+        Analiza una imagen y devuelve una respuesta JSON estructurada y limpia.
         """
         try:
-            # El prompt está optimizado para forzar una salida JSON limpia
+            # Prompt optimizado para forzar una salida JSON limpia y detallada.
             prompt = f"""
             Analiza esta imagen de un objeto de inventario.
             Descripción adicional del sistema de detección: "{description}"
             
-            Tu tarea es actuar como un experto catalogador. Responde ÚNICAMENTE con un objeto JSON válido con las siguientes claves:
+            Actúa como un experto catalogador. Tu única salida debe ser un objeto JSON válido con estas claves:
             - "elemento_identificado": (string) El nombre específico y descriptivo del objeto.
-            - "cantidad_aproximada": (integer) El número de unidades que ves.
-            - "estado_condicion": (string) La condición aparente (ej: "Nuevo en caja", "Usado").
-            - "caracteristicas_distintivas": (string) Una lista de características visuales en una sola cadena de texto.
-            - "posible_categoria_de_inventario": (string) La categoría más lógica (ej: "Electrónica").
+            - "cantidad_aproximada": (integer) El número de unidades que ves. Si es solo uno, pon 1.
+            - "estado_condicion": (string) La condición aparente (ej: "Nuevo en empaque", "Usado, con ligeras marcas", "Componente individual").
+            - "caracteristicas_distintivas": (string) Una lista separada por comas de características visuales clave (ej: "Color rojo, carcasa metálica, conector USB-C").
+            - "posible_categoria_de_inventario": (string) La categoría más lógica (ej: "Componentes Electrónicos", "Ferretería", "Material de Oficina").
+            - "marca_modelo_sugerido": (string) Si es visible, la marca y/o modelo del objeto (ej: "Sony WH-1000XM4"). Si no, pon "No visible".
 
-            IMPORTANTE: Tu respuesta debe ser solo el objeto JSON, sin texto adicional, explicaciones, ni las marcas ```json.
+            IMPORTANTE: Responde solo con el objeto JSON, sin texto adicional, explicaciones, ni las marcas ```json.
             """
             
             response = self.model.generate_content([prompt, image_pil])
             
+            # Limpieza robusta de la respuesta para extraer solo el JSON.
             if response and response.text:
-                return response.text.strip()
+                clean_text = response.text.strip()
+                json_start = clean_text.find('{')
+                json_end = clean_text.rfind('}') + 1
+                if json_start != -1 and json_end != 0:
+                    json_str = clean_text[json_start:json_end]
+                    # Validar si es un JSON válido antes de devolver
+                    try:
+                        json.loads(json_str)
+                        return json_str
+                    except json.JSONDecodeError:
+                         return json.dumps({"error": "La IA devolvió un JSON mal formado.", "raw_response": clean_text})
+                else:
+                    return json.dumps({"error": "No se encontró un objeto JSON en la respuesta de la IA.", "raw_response": clean_text})
             else:
                 return json.dumps({"error": "La IA no devolvió una respuesta válida."})
                 
         except Exception as e:
             logger.error(f"Error crítico durante el análisis de imagen con Gemini: {e}")
             return json.dumps({"error": f"No se pudo contactar al servicio de IA: {str(e)}"})
-
