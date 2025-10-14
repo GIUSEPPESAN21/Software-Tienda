@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.9 - Flujo de Pedidos Mejorado y Corrección de Errores
+Versión 3.10 - Corrección de Error de Renderizado (Keys Estables)
 """
 import streamlit as st
 from PIL import Image
@@ -72,7 +72,7 @@ def init_session_state():
         'order_items': [],
         'analysis_results': None,
         'editing_item_id': None,
-        'scanned_item': None # Nuevo para el flujo de pedidos
+        'scanned_item': None
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -95,7 +95,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.9")
+st.sidebar.title("HI-DRIVE 3.10")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -104,7 +104,6 @@ PAGES = {
 for page_name, icon in PAGES.items():
     if st.sidebar.button(f"{page_name}", use_container_width=True, type="primary" if st.session_state.page == page_name else "secondary"):
         st.session_state.page = page_name
-        # Limpiar estados específicos al cambiar de página para evitar datos residuales
         st.session_state.analysis_results = None
         st.session_state.editing_item_id = None
         st.session_state.scanned_item = None
@@ -358,9 +357,8 @@ elif st.session_state.page == "🛒 Pedidos":
                         st.rerun()
                     else:
                         st.error(f"El código '{code}' no se encontró en el inventario.")
-                        st.session_state.scanned_item = None # Limpiar por si acaso
+                        st.session_state.scanned_item = None
             
-            # --- NUEVO FLUJO: Confirmar cantidad del item escaneado ---
             if st.session_state.scanned_item:
                 item = st.session_state.scanned_item
                 st.success(f"Artículo escaneado: **{item['name']}**")
@@ -368,7 +366,7 @@ elif st.session_state.page == "🛒 Pedidos":
                 
                 if st.button("Confirmar y Añadir al Pedido", type="primary"):
                     st.session_state.order_items.append(dict(item, **{'order_quantity': quantity_to_add}))
-                    st.session_state.scanned_item = None # Limpiar para el proximo escaneo
+                    st.session_state.scanned_item = None
                     st.rerun()
 
     with col2:
@@ -377,16 +375,21 @@ elif st.session_state.page == "🛒 Pedidos":
             st.info("Añade artículos para comenzar un pedido.")
         else:
             total_price = 0
+            # --- INICIO DE LA CORRECCIÓN ---
             for i, item in enumerate(st.session_state.order_items):
                 c1, c2, c3, c4 = st.columns([4,2,2,1])
                 c1.text(item['name'])
-                new_qty = c2.number_input("Cantidad", value=item['order_quantity'], min_value=1, key=f"qty_{i}")
+                # Usar una llave única y estable
+                item_id = item.get('id', f'item_{i}')
+                new_qty = c2.number_input("Cantidad", value=item['order_quantity'], min_value=1, key=f"qty_{item_id}_{i}")
                 st.session_state.order_items[i]['order_quantity'] = new_qty
                 item_total = item.get('sale_price', 0) * new_qty
                 c3.text(f"${item_total:,.2f}")
                 total_price += item_total
-                if c4.button("🗑️", key=f"del_{i}"):
-                    st.session_state.order_items.pop(i); st.rerun()
+                if c4.button("🗑️", key=f"del_{item_id}_{i}"):
+                    st.session_state.order_items.pop(i)
+                    st.rerun()
+            # --- FIN DE LA CORRECCIÓN ---
             
             st.metric("Precio Total del Pedido", f"${total_price:,.2f}")
             
@@ -470,23 +473,17 @@ elif st.session_state.page == "📊 Analítica":
 
         with tab2:
             all_items_sold = [ing for o in completed_orders for ing in o.get('ingredients', [])]
-            
-            # --- CORRECCIÓN: Bucle For tradicional para evitar NameError ---
             item_sales = {}
             for item in all_items_sold:
                 if 'name' in item:
                     item_sales[item['name']] = item_sales.get(item['name'], 0) + item.get('quantity', 0)
-            
             item_profits = {}
             for item in all_items_sold:
                  if 'name' in item:
                     profit = (item.get('sale_price', item.get('purchase_price', 0)) - item.get('purchase_price', 0)) * item.get('quantity', 0)
                     item_profits[item['name']] = item_profits.get(item['name'], 0) + profit
-            # --- FIN DE LA CORRECCIÓN ---
-
             df_sales = pd.DataFrame(list(item_sales.items()), columns=['Artículo', 'Unidades Vendidas']).sort_values('Unidades Vendidas', ascending=False)
             df_profits = pd.DataFrame(list(item_profits.items()), columns=['Artículo', 'Beneficio Generado']).sort_values('Beneficio Generado', ascending=False)
-            
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Top 5 - Artículos Más Vendidos")
@@ -494,13 +491,11 @@ elif st.session_state.page == "📊 Analítica":
             with col2:
                 st.subheader("Top 5 - Artículos Más Rentables")
                 st.dataframe(df_profits.head(5), hide_index=True)
-
             st.markdown("---")
             st.subheader("Inventario de Lenta Rotación (no vendido en los últimos 30 días)")
             thirty_days_ago = datetime.now() - timedelta(days=30)
             sold_item_ids = {ing['id'] for o in completed_orders if o.get('timestamp_obj') and o['timestamp_obj'] > thirty_days_ago for ing in o.get('ingredients', [])}
             slow_moving_items = [item for item in all_inventory_items if item['id'] not in sold_item_ids]
-            
             if not slow_moving_items:
                 st.success("¡Todos los artículos han tenido movimiento en los últimos 30 días!")
             else:
@@ -550,3 +545,4 @@ elif st.session_state.page == "👥 Acerca de":
                 - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
                 """
             )
+
