@@ -165,12 +165,16 @@ class FirebaseManager:
 
     def get_orders(self, status=None):
         try:
-            query = self.db.collection('orders').order_by("timestamp", direction=firestore.Query.DESCENDING)
+            query = self.db.collection('orders')
             if status:
                 query = query.where(filter=firestore.FieldFilter('status', '==', status))
             
             docs = query.stream()
             orders = [dict(order.to_dict(), **{'id': order.id}) for order in docs]
+            
+            # Ordenar en Python para evitar la necesidad de un índice compuesto inmediato
+            orders.sort(key=lambda x: x.get('timestamp'), reverse=True)
+            
             return orders
         except Exception as e:
             logger.error(f"Error al obtener pedidos: {e}")
@@ -225,3 +229,4 @@ class FirebaseManager:
         except Exception as e:
             logger.error(f"Error al eliminar proveedor: {e}")
             raise
+
