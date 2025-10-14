@@ -43,7 +43,7 @@ def _complete_order_atomic(transaction, db, order_id):
         new_quantity = current_quantity - ing['quantity']
         transaction.update(item_ref, {'quantity': new_quantity})
 
-        # --- NUEVO: Registrar en el historial de movimientos ---
+        # Registrar en el historial de movimientos
         history_ref = item_ref.collection('history').document()
         history_data = {
             "timestamp": datetime.now(),
@@ -53,7 +53,7 @@ def _complete_order_atomic(transaction, db, order_id):
         }
         transaction.set(history_ref, history_data)
 
-        # --- NUEVO: Comprobar alerta de stock mínimo ---
+        # Comprobar alerta de stock mínimo
         min_stock_alert = item_data.get('min_stock_alert', 0)
         if 0 < new_quantity <= min_stock_alert:
             low_stock_alerts.append(f"'{item_data.get('name')}' ha alcanzado el umbral de stock mínimo ({new_quantity}/{min_stock_alert}).")
@@ -86,19 +86,24 @@ class FirebaseManager:
             logger.error(f"Error fatal al inicializar Firebase: {e}")
             raise
 
-    # --- Métodos de Inventario Mejorados ---
+    # --- Métodos de Inventario ---
     def save_inventory_item(self, data, custom_id, is_new=False):
         try:
             doc_ref = self.db.collection('inventory').document(custom_id)
             doc_ref.set(data, merge=True)
             
-            # Registrar en el historial
-            history_type = "Stock Inicial" if is_new else "Ajuste Manual"
+            if is_new:
+                history_type = "Stock Inicial"
+                details = "Artículo creado en el sistema."
+            else:
+                history_type = "Ajuste Manual"
+                details = "Artículo actualizado manualmente."
+            
             history_data = {
                 "timestamp": datetime.now(),
                 "type": history_type,
                 "quantity_change": data.get('quantity', 0),
-                "details": "Artículo creado o actualizado manualmente."
+                "details": details
             }
             doc_ref.collection('history').add(history_data)
 
@@ -139,29 +144,38 @@ class FirebaseManager:
     def delete_inventory_item(self, doc_id):
         try:
             self.db.collection('inventory').document(doc_id).delete()
-            # Opcional: Implementar borrado de sub-colecciones si es necesario
             logger.info(f"Elemento de inventario {doc_id} eliminado.")
         except Exception as e:
             logger.error(f"Error al eliminar de 'inventory': {e}")
             raise
 
-    # --- Métodos de Pedidos Mejorados ---
+    # --- Métodos de Pedidos ---
     def create_order(self, order_data):
         try:
-            # --- NUEVO: Enriquecer ingredientes con costo de compra ---
             enriched_ingredients = []
             for ing in order_data['ingredients']:
                 item_details = self.get_inventory_item_details(ing['id'])
                 if item_details:
                     ing['purchase_price'] = item_details.get('purchase_price', 0)
+                    ing['sale_price'] = item_details.get('sale_price', 0)
                 enriched_ingredients.append(ing)
             
             order_data['ingredients'] = enriched_ingredients
             self.db.collection('orders').add(order_data)
-            logger.info("Nuevo pedido creado con datos enriquecidos.")
+            logger.info("Nuevo pedido creado con datos de precios enriquecidos.")
         except Exception as e:
             logger.error(f"Error al crear pedido: {e}")
             raise
+
+    def get_order_count(self):
+        """Cuenta el número total de documentos en la colección de pedidos."""
+        try:
+            count_query = self.db.collection('orders').count()
+            count_result = count_query.get()
+            return count_result[0][0].value
+        except Exception as e:
+            logger.error(f"Error al contar pedidos: {e}")
+            return 0
 
     def get_orders(self, status=None):
         try:
@@ -172,8 +186,7 @@ class FirebaseManager:
             docs = query.stream()
             orders = [dict(order.to_dict(), **{'id': order.id}) for order in docs]
             
-            # Ordenar en Python para evitar la necesidad de un índice compuesto inmediato
-            orders.sort(key=lambda x: x.get('timestamp'), reverse=True)
+            orders.sort(key=lambda x: x.get('timestamp', datetime.min), reverse=True)
             
             return orders
         except Exception as e:
@@ -196,7 +209,7 @@ class FirebaseManager:
             logger.error(f"Fallo la transacción para el pedido {order_id}: {e}")
             return False, f"Error en la transacción: {str(e)}", []
             
-    # --- NUEVO: Métodos CRUD para Proveedores ---
+    # --- Métodos CRUD para Proveedores ---
     def add_supplier(self, supplier_data):
         try:
             self.db.collection('suppliers').add(supplier_data)
