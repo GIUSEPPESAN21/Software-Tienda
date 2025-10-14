@@ -363,9 +363,12 @@ elif st.session_state.page == "🛒 Pedidos":
         # Lógica para añadir ingredientes dinámicamente
         for i in range(len(st.session_state.order_ingredients)):
             c1, c2, c3 = st.columns([4, 2, 1])
-            # Usamos el índice de la lista de llaves para el selectbox
             inventory_names = list(inventory.keys())
-            st.session_state.order_ingredients[i]['name'] = c1.selectbox(f"Artículo {i+1}", inventory_names, key=f"ing_name_{i}")
+            current_selection = st.session_state.order_ingredients[i]['name']
+            # Asegurarse que la selección actual esté en la lista
+            current_index = inventory_names.index(current_selection) if current_selection in inventory_names else 0
+            
+            st.session_state.order_ingredients[i]['name'] = c1.selectbox(f"Artículo {i+1}", inventory_names, key=f"ing_name_{i}", index=current_index)
             st.session_state.order_ingredients[i]['quantity'] = c2.number_input("Cantidad", min_value=1, key=f"ing_qty_{i}")
             if c3.button("🗑️", key=f"del_ing_{i}"):
                 st.session_state.order_ingredients.pop(i)
@@ -384,21 +387,30 @@ elif st.session_state.page == "🛒 Pedidos":
             
             submitted = st.form_submit_button("Crear Pedido", type="primary", use_container_width=True)
             if submitted:
-                valid_ings = []
-                # Validar ingredientes desde el estado de sesión al momento del envío
-                for ing in st.session_state.order_ingredients:
-                    if ing['name'] and inventory[ing['name']]['quantity'] >= ing['quantity']:
+                if not st.session_state.order_ingredients:
+                    st.error("No se han añadido artículos al pedido.")
+                else:
+                    valid_ings = []
+                    has_error = False
+                    # Validar ingredientes desde el estado de sesión al momento del envío
+                    for ing in st.session_state.order_ingredients:
+                        if not ing['name']:
+                            st.error("Hay un artículo sin seleccionar en el pedido.")
+                            has_error = True
+                            break
+                        if inventory[ing['name']]['quantity'] < ing['quantity']:
+                            st.error(f"Stock insuficiente para {ing['name']}.")
+                            has_error = True
+                            break
                         valid_ings.append({'id': inventory[ing['name']]['id'], 'name': ing['name'], 'quantity': ing['quantity']})
-                    else:
-                        st.error(f"Stock insuficiente para {ing['name']}.")
-                
-                if title and price > 0 and valid_ings:
-                    order_data = {'title': title, 'price': price, 'ingredients': valid_ings, 'status': 'processing', 'timestamp': datetime.now()}
-                    firebase.create_order(order_data)
-                    st.success("Pedido creado.")
-                    send_whatsapp_alert(f"🧾 Nuevo Pedido: {title} por ${price:.2f}")
-                    st.session_state.order_ingredients = []
-                    st.rerun()
+                    
+                    if not has_error and title and price > 0:
+                        order_data = {'title': title, 'price': price, 'ingredients': valid_ings, 'status': 'processing', 'timestamp': datetime.now()}
+                        firebase.create_order(order_data)
+                        st.success("Pedido creado.")
+                        send_whatsapp_alert(f"🧾 Nuevo Pedido: {title} por ${price:.2f}")
+                        st.session_state.order_ingredients = []
+                        st.rerun()
 
     with col2:
         st.subheader("⏳ Pedidos en Proceso")
@@ -499,6 +511,7 @@ elif st.session_state.page == "👥 Acerca de":
                 - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
                 """
             )
+
 
 
 
