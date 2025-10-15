@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.15 - Flujo de Gestión por Escáner en Análisis IA
+Versión 3.16 - Flujo de Escaneo Rápido y Fiable Corregido
 """
 import streamlit as st
 from PIL import Image
@@ -110,7 +110,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.15")
+st.sidebar.title("HI-DRIVE 3.16")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -173,11 +173,80 @@ elif st.session_state.page == "📸 Análisis IA":
     st.info("Usa la detección de objetos para un análisis detallado o el escáner de códigos para una gestión rápida de inventario.")
     source_options = ["🧠 Detección de Objetos", "║█║ Escáner de Código"]
     img_source = st.selectbox("Selecciona el modo de análisis:", source_options)
-    img_buffer = st.camera_input("Apunta la cámara al objetivo", key="ia_camera")
+    
+    # --- INICIO DE LA MEJORA: Flujo de Escaneo Inteligente ---
+    if img_source == "║█║ Escáner de Código":
+        st.subheader("Gestión de Inventario por Código")
+        
+        # El widget de la cámara ahora tiene una llave única para esta sección
+        img_buffer = st.camera_input("Apunta la cámara al código de barras", key="scanner_ia_page")
 
-    if img_buffer:
-        pil_image = Image.open(img_buffer)
-        if img_source == "🧠 Detección de Objetos":
+        if img_buffer:
+            with st.spinner("Buscando códigos..."):
+                pil_image = Image.open(img_buffer)
+                decoded_objects = enhanced_barcode_reader(pil_image)
+                if decoded_objects:
+                    code_data = decoded_objects[0].data.decode('utf-8')
+                    item = firebase.get_inventory_item_details(code_data)
+                    # Guardamos el resultado en el estado de sesión para que persista
+                    st.session_state.scanned_item_data = {'code': code_data, 'item': item}
+                else:
+                    st.warning("No se encontraron códigos de barras o QR.")
+                    # Limpiamos el estado si no se encuentra nada
+                    st.session_state.scanned_item_data = None
+        
+        # Esta parte del código se ejecuta siempre, mostrando el resultado del último escaneo
+        if st.session_state.scanned_item_data:
+            scan_data = st.session_state.scanned_item_data
+            item, code = scan_data['item'], scan_data['code']
+            
+            st.success(f"Último código escaneado: **{code}**")
+
+            if item: # Si el artículo EXISTE, mostramos opciones de edición
+                st.subheader("✔️ Artículo Encontrado: ¿Qué deseas hacer?")
+                st.markdown(f"**Nombre:** {item.get('name', 'N/A')} | **Stock Actual:** {item.get('quantity', 0)}")
+                
+                if st.button("✏️ Editar Detalles Completos", help="Ir a la página de inventario para editar todos los campos de este producto."):
+                    st.session_state.editing_item_id = item['id']
+                    st.session_state.page = "📦 Inventario"
+                    st.rerun()
+
+            else: # Si el artículo NO EXISTE, mostramos el formulario de creación
+                st.subheader("➕ Artículo Nuevo: Registrar en Inventario")
+                st.info(f"El código **{code}** no está en la base de datos. Por favor, completa los detalles.")
+                
+                with st.form("create_from_scan_form"):
+                    suppliers = firebase.get_all_suppliers()
+                    supplier_map = {s['name']: s['id'] for s in suppliers}
+                    
+                    name = st.text_input("Nombre del Artículo")
+                    quantity = st.number_input("Cantidad Inicial", min_value=1, step=1)
+                    sale_price = st.number_input("Precio de Venta ($)", min_value=0.0, format="%.2f")
+                    purchase_price = st.number_input("Precio de Compra ($)", min_value=0.0, format="%.2f")
+                    min_stock_alert = st.number_input("Umbral de Alerta", min_value=0, step=1)
+                    selected_supplier_name = st.selectbox("Proveedor", [""] + list(supplier_map.keys()))
+
+                    if st.form_submit_button("Guardar Nuevo Artículo", type="primary"):
+                        if name and quantity > 0:
+                            data = {
+                                "name": name, "quantity": quantity, "sale_price": sale_price,
+                                "purchase_price": purchase_price, "min_stock_alert": min_stock_alert,
+                                "supplier_id": supplier_map.get(selected_supplier_name),
+                                "supplier_name": selected_supplier_name, "updated_at": datetime.now().isoformat()
+                            }
+                            firebase.save_inventory_item(data, code, is_new=True)
+                            st.success(f"Nuevo artículo '{name}' guardado con éxito.")
+                            st.session_state.scanned_item_data = None
+                            st.rerun()
+                        else:
+                            st.warning("El nombre y la cantidad son obligatorios.")
+    # --- FIN DE LA MEJORA ---
+    
+    # --- Flujo de Detección de Objetos (sin cambios) ---
+    elif img_source == "🧠 Detección de Objetos":
+        img_buffer = st.camera_input("Apunta la cámara al objetivo", key="detector_ia_page")
+        if img_buffer:
+            pil_image = Image.open(img_buffer)
             with st.spinner("Detectando objetos con IA Local..."):
                 results = yolo(pil_image)
             st.image(results[0].plot(), caption="Objetos detectados por YOLO.", use_column_width=True)
@@ -196,65 +265,6 @@ elif st.session_state.page == "📸 Análisis IA":
                             st.rerun()
             else:
                 st.warning("No se detectaron objetos conocidos en la imagen.")
-        
-        # --- INICIO DE LA MEJORA ---
-        elif img_source == "║█║ Escáner de Código":
-            with st.spinner("Buscando códigos..."):
-                decoded_objects = enhanced_barcode_reader(pil_image)
-                if not decoded_objects:
-                    st.warning("No se encontraron códigos de barras o QR.")
-                else:
-                    code_data = decoded_objects[0].data.decode('utf-8')
-                    st.success(f"Código detectado: **{code_data}**")
-                    item = firebase.get_inventory_item_details(code_data)
-                    st.session_state.scanned_item_data = {'code': code_data, 'item': item}
-                    st.session_state.analysis_results = None
-                    st.rerun()
-
-    # --- FLUJO UNIFICADO POST-ESCÁNER ---
-    if st.session_state.scanned_item_data:
-        scan_data = st.session_state.scanned_item_data
-        item, code = scan_data['item'], scan_data['code']
-        
-        if item: # Si el artículo EXISTE
-            st.subheader("✔️ Artículo Encontrado")
-            st.markdown(f"**Nombre:** {item.get('name', 'N/A')} | **Stock Actual:** {item.get('quantity', 0)}")
-            
-            if st.button("✏️ Editar Detalles Completos"):
-                st.session_state.editing_item_id = item['id']
-                st.session_state.page = "📦 Inventario"
-                st.rerun()
-        
-        else: # Si el artículo NO EXISTE
-            st.subheader("➕ Artículo Nuevo: Registrar en Inventario")
-            st.info(f"El código **{code}** no está en la base de datos. Por favor, completa los detalles.")
-            
-            with st.form("create_from_scan_form"):
-                suppliers = firebase.get_all_suppliers()
-                supplier_map = {s['name']: s['id'] for s in suppliers}
-                
-                name = st.text_input("Nombre del Artículo")
-                quantity = st.number_input("Cantidad Inicial", min_value=1, step=1)
-                sale_price = st.number_input("Precio de Venta ($)", min_value=0.0, format="%.2f")
-                purchase_price = st.number_input("Precio de Compra ($)", min_value=0.0, format="%.2f")
-                min_stock_alert = st.number_input("Umbral de Alerta", min_value=0, step=1)
-                selected_supplier_name = st.selectbox("Proveedor", [""] + list(supplier_map.keys()))
-
-                if st.form_submit_button("Guardar Nuevo Artículo", type="primary"):
-                    if name and quantity > 0:
-                        data = {
-                            "name": name, "quantity": quantity, "sale_price": sale_price,
-                            "purchase_price": purchase_price, "min_stock_alert": min_stock_alert,
-                            "supplier_id": supplier_map.get(selected_supplier_name),
-                            "supplier_name": selected_supplier_name, "updated_at": datetime.now().isoformat()
-                        }
-                        firebase.save_inventory_item(data, code, is_new=True)
-                        st.success(f"Nuevo artículo '{name}' guardado con éxito.")
-                        st.session_state.scanned_item_data = None
-                        st.rerun()
-                    else:
-                        st.warning("El nombre y la cantidad son obligatorios.")
-    # --- FIN DE LA MEJORA ---
 
     if st.session_state.analysis_results and "error" not in st.session_state.analysis_results:
         res = st.session_state.analysis_results
@@ -516,13 +526,10 @@ elif st.session_state.page == "📊 Analítica":
                 st.warning("No hay suficientes datos de fecha para generar un gráfico de tendencias.")
         with tab2:
             all_items_sold = [ing for o in completed_orders for ing in o.get('ingredients', [])]
-            item_sales = {}
+            item_sales, item_profits = {}, {}
             for item in all_items_sold:
                 if 'name' in item:
                     item_sales[item['name']] = item_sales.get(item['name'], 0) + item.get('quantity', 0)
-            item_profits = {}
-            for item in all_items_sold:
-                 if 'name' in item:
                     profit = (item.get('sale_price', item.get('purchase_price', 0)) - item.get('purchase_price', 0)) * item.get('quantity', 0)
                     item_profits[item['name']] = item_profits.get(item['name'], 0) + profit
             df_sales = pd.DataFrame(list(item_sales.items()), columns=['Artículo', 'Unidades Vendidas']).sort_values('Unidades Vendidas', ascending=False)
