@@ -1,18 +1,21 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.13 - Flujo de Escaneo Unificado y Corrección de Errores
+Versión 3.15 - Flujo de Gestión por Escáner en Análisis IA
 """
 import streamlit as st
 from PIL import Image
 import pandas as pd
 import plotly.express as px
 import json
-from datetime import datetime, timedelta, timezone # <-- Se ha añadido timezone
+from datetime import datetime, timedelta, timezone
+import numpy as np
+import cv2
 
 # --- Importaciones de utilidades y modelos ---
 try:
     from pyzbar.pyzbar import decode
+    from skimage.filters import threshold_local
     from firebase_utils import FirebaseManager
     from gemini_utils import GeminiUtils
     from ultralytics import YOLO
@@ -42,6 +45,23 @@ def load_css():
 
 load_css()
 
+# --- LECTOR DE CÓDIGOS DE BARRAS POTENCIADO ---
+def enhanced_barcode_reader(pil_image):
+    try:
+        image_cv = np.array(pil_image.convert('RGB'))
+        gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
+        block_size = 41
+        local_thresh = threshold_local(gray, block_size, offset=10)
+        binary_adaptive = gray > local_thresh
+        processed_image = Image.fromarray((binary_adaptive * 255).astype(np.uint8))
+        decoded_objects = decode(processed_image)
+        if not decoded_objects:
+            decoded_objects = decode(pil_image)
+        return decoded_objects
+    except Exception as e:
+        st.error(f"Error procesando imagen para escáner: {e}")
+        return []
+
 
 # --- INICIALIZACIÓN DE SERVICIOS (CACHED) ---
 @st.cache_resource
@@ -50,11 +70,9 @@ def initialize_services():
         yolo_model = YOLO('yolov8m.pt')
         firebase_handler = FirebaseManager()
         gemini_handler = GeminiUtils()
-        
         twilio_client = None
         if IS_TWILIO_AVAILABLE and all(k in st.secrets for k in ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]):
             twilio_client = Client(st.secrets["TWILIO_ACCOUNT_SID"], st.secrets["TWILIO_AUTH_TOKEN"])
-            
         return yolo_model, firebase_handler, gemini_handler, twilio_client
     except Exception as e:
         st.error(f"**Error Crítico de Inicialización:** {e}")
@@ -68,11 +86,8 @@ if not all([yolo, firebase, gemini]):
 # --- Funciones de Estado de Sesión ---
 def init_session_state():
     defaults = {
-        'page': "🏠 Inicio",
-        'order_items': [],
-        'analysis_results': None,
-        'editing_item_id': None,
-        'scanned_item_data': None # Nuevo estado para el flujo unificado
+        'page': "🏠 Inicio", 'order_items': [], 'analysis_results': None,
+        'editing_item_id': None, 'scanned_item_data': None
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -95,7 +110,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.13")
+st.sidebar.title("HI-DRIVE 3.15")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -104,7 +119,6 @@ PAGES = {
 for page_name, icon in PAGES.items():
     if st.sidebar.button(f"{page_name}", use_container_width=True, type="primary" if st.session_state.page == page_name else "secondary"):
         st.session_state.page = page_name
-        # Limpiar estados para evitar datos residuales entre páginas
         st.session_state.analysis_results = None
         st.session_state.editing_item_id = None
         st.session_state.scanned_item_data = None
@@ -119,7 +133,7 @@ st.markdown(f'<h1 class="main-header">{page_title}</h1>', unsafe_allow_html=True
 st.markdown("<hr>", unsafe_allow_html=True)
 
 # ----------------------------------
-# PÁGINA: INICIO
+# PÁGINA: INICIO (Sin Cambios)
 # ----------------------------------
 if st.session_state.page == "🏠 Inicio":
     st.subheader("Plataforma de gestión inteligente para un control total sobre su inventario.")
@@ -153,7 +167,7 @@ if st.session_state.page == "🏠 Inicio":
                 st.warning(f"**{item['name']}**: {item['quantity']} unidades restantes (Umbral: {item['min_stock_alert']})")
 
 # ----------------------------------
-# PÁGINA: ANÁLISIS IA (CON FLUJO UNIFICADO DE ESCÁNER)
+# PÁGINA: ANÁLISIS IA (SECCIÓN MODIFICADA)
 # ----------------------------------
 elif st.session_state.page == "📸 Análisis IA":
     st.info("Usa la detección de objetos para un análisis detallado o el escáner de códigos para una gestión rápida de inventario.")
@@ -164,7 +178,6 @@ elif st.session_state.page == "📸 Análisis IA":
     if img_buffer:
         pil_image = Image.open(img_buffer)
         if img_source == "🧠 Detección de Objetos":
-            # ... (Lógica de detección de objetos sin cambios)
             with st.spinner("Detectando objetos con IA Local..."):
                 results = yolo(pil_image)
             st.image(results[0].plot(), caption="Objetos detectados por YOLO.", use_column_width=True)
@@ -179,71 +192,74 @@ elif st.session_state.page == "📸 Análisis IA":
                             coords = box.xyxy[0].cpu().numpy().astype(int)
                             analysis_json = gemini.analyze_image(pil_image.crop(tuple(coords)), class_name)
                             st.session_state.analysis_results = json.loads(analysis_json)
-                            st.session_state.scanned_item_data = None # Limpiar para no mostrar ambos
+                            st.session_state.scanned_item_data = None
                             st.rerun()
             else:
                 st.warning("No se detectaron objetos conocidos en la imagen.")
-
+        
+        # --- INICIO DE LA MEJORA ---
         elif img_source == "║█║ Escáner de Código":
             with st.spinner("Buscando códigos..."):
-                decoded_objects = decode(pil_image)
+                decoded_objects = enhanced_barcode_reader(pil_image)
                 if not decoded_objects:
                     st.warning("No se encontraron códigos de barras o QR.")
                 else:
                     code_data = decoded_objects[0].data.decode('utf-8')
                     st.success(f"Código detectado: **{code_data}**")
                     item = firebase.get_inventory_item_details(code_data)
-                    # Guardar resultado en el estado de la sesión para el flujo unificado
                     st.session_state.scanned_item_data = {'code': code_data, 'item': item}
-                    st.session_state.analysis_results = None # Limpiar para no mostrar ambos
+                    st.session_state.analysis_results = None
                     st.rerun()
 
-    # --- INICIO DE LA MEJORA: FLUJO UNIFICADO POST-ESCÁNER ---
+    # --- FLUJO UNIFICADO POST-ESCÁNER ---
     if st.session_state.scanned_item_data:
         scan_data = st.session_state.scanned_item_data
-        item = scan_data['item']
-        code = scan_data['code']
-
+        item, code = scan_data['item'], scan_data['code']
+        
         if item: # Si el artículo EXISTE
-            st.subheader("✔️ Artículo Encontrado: Actualizar Stock")
+            st.subheader("✔️ Artículo Encontrado")
             st.markdown(f"**Nombre:** {item.get('name', 'N/A')} | **Stock Actual:** {item.get('quantity', 0)}")
-            with st.form("update_stock_form"):
-                quantity_to_add = st.number_input("Cantidad a AÑADIR al stock actual", min_value=1, step=1)
-                if st.form_submit_button("Actualizar Stock", type="primary"):
-                    new_quantity = item.get('quantity', 0) + quantity_to_add
-                    firebase.save_inventory_item({'quantity': new_quantity}, code, is_new=False, details=f"Añadido {quantity_to_add} unidades vía escáner.")
-                    st.success(f"Stock de '{item.get('name')}' actualizado a {new_quantity}.")
-                    st.session_state.scanned_item_data = None # Limpiar para el próximo escaneo
-                    st.rerun()
+            
+            if st.button("✏️ Editar Detalles Completos"):
+                st.session_state.editing_item_id = item['id']
+                st.session_state.page = "📦 Inventario"
+                st.rerun()
         
         else: # Si el artículo NO EXISTE
             st.subheader("➕ Artículo Nuevo: Registrar en Inventario")
             st.info(f"El código **{code}** no está en la base de datos. Por favor, completa los detalles.")
+            
             with st.form("create_from_scan_form"):
+                suppliers = firebase.get_all_suppliers()
+                supplier_map = {s['name']: s['id'] for s in suppliers}
+                
                 name = st.text_input("Nombre del Artículo")
                 quantity = st.number_input("Cantidad Inicial", min_value=1, step=1)
                 sale_price = st.number_input("Precio de Venta ($)", min_value=0.0, format="%.2f")
-                # Aquí se podrían añadir más campos como precio de compra, proveedor, etc.
-                
+                purchase_price = st.number_input("Precio de Compra ($)", min_value=0.0, format="%.2f")
+                min_stock_alert = st.number_input("Umbral de Alerta", min_value=0, step=1)
+                selected_supplier_name = st.selectbox("Proveedor", [""] + list(supplier_map.keys()))
+
                 if st.form_submit_button("Guardar Nuevo Artículo", type="primary"):
                     if name and quantity > 0:
-                        data = {"name": name, "quantity": quantity, "sale_price": sale_price}
+                        data = {
+                            "name": name, "quantity": quantity, "sale_price": sale_price,
+                            "purchase_price": purchase_price, "min_stock_alert": min_stock_alert,
+                            "supplier_id": supplier_map.get(selected_supplier_name),
+                            "supplier_name": selected_supplier_name, "updated_at": datetime.now().isoformat()
+                        }
                         firebase.save_inventory_item(data, code, is_new=True)
                         st.success(f"Nuevo artículo '{name}' guardado con éxito.")
-                        st.session_state.scanned_item_data = None # Limpiar
+                        st.session_state.scanned_item_data = None
                         st.rerun()
                     else:
                         st.warning("El nombre y la cantidad son obligatorios.")
+    # --- FIN DE LA MEJORA ---
 
-    # --- Flujo de Análisis de Gemini (sin cambios) ---
     if st.session_state.analysis_results and "error" not in st.session_state.analysis_results:
-        # ... (código de vinculación de Gemini sin cambios)
         res = st.session_state.analysis_results
         st.subheader("✔️ Resultado del Análisis de Gemini")
-        st.markdown(f"""
-        - **Producto:** {res.get('elemento_identificado', 'N/A')}
-        - **Marca/Modelo:** {res.get('marca_modelo_sugerido', 'N/A')}
-        """)
+        st.markdown(f"""- **Producto:** {res.get('elemento_identificado', 'N/A')}\n- **Marca/Modelo:** {res.get('marca_modelo_sugerido', 'N/A')}""")
         st.subheader("Vincular con Base de Datos")
         action = st.radio("Elige una acción:", ("Crear nuevo artículo", "Vincular a artículo existente"))
         all_items = firebase.get_all_inventory_items()
@@ -266,14 +282,13 @@ elif st.session_state.page == "📸 Análisis IA":
                     item_id = item_map.get(selected_item_name)
                     if item_id:
                         data = {"analisis_ia": res, "updated_at": datetime.now().isoformat()}
-                        firebase.save_inventory_item(data, item_id, is_new=False)
+                        firebase.save_inventory_item(data, item_id, is_new=False, details="Vinculación de datos de IA.")
                         st.success(f"Información vinculada a '{selected_item_name}'.")
 
 # ----------------------------------
-# PÁGINA: INVENTARIO
+# PÁGINAS RESTANTES (Sin Cambios)
 # ----------------------------------
 elif st.session_state.page == "📦 Inventario":
-    # ... (código de inventario sin cambios)
     if st.session_state.editing_item_id:
         item_to_edit = firebase.get_inventory_item_details(st.session_state.editing_item_id)
         st.subheader(f"✏️ Editando: {item_to_edit.get('name')}")
@@ -297,8 +312,7 @@ elif st.session_state.page == "📦 Inventario":
                             "supplier_name": selected_supplier_name, "updated_at": datetime.now().isoformat()}
                     firebase.save_inventory_item(data, st.session_state.editing_item_id, is_new=False, details=f"Edición manual de datos.")
                     st.success(f"Artículo '{name}' actualizado.")
-                    st.session_state.editing_item_id = None
-                    st.rerun()
+                    st.session_state.editing_item_id = None; st.rerun()
             if c2.form_submit_button("Cancelar", use_container_width=True):
                 st.session_state.editing_item_id = None; st.rerun()
     else:
@@ -339,11 +353,7 @@ elif st.session_state.page == "📦 Inventario":
                     else:
                         st.error("ID no válido, vacío o ya existente.")
 
-# ----------------------------------
-# PÁGINA: PROVEEDORES
-# ----------------------------------
 elif st.session_state.page == "👥 Proveedores":
-    # ... (código de proveedores sin cambios)
     col1, col2 = st.columns([1, 2])
     with col1:
         with st.form("add_supplier_form", clear_on_submit=True):
@@ -366,45 +376,51 @@ elif st.session_state.page == "👥 Proveedores":
                 st.write(f"**Email:** {s.get('email', 'N/A')}")
                 st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
-# ----------------------------------
-# PÁGINA: PEDIDOS
-# ----------------------------------
 elif st.session_state.page == "🛒 Pedidos":
-    # ... (código de pedidos sin cambios)
     items_from_db = firebase.get_all_inventory_items()
     inventory_by_id = {item['id']: item for item in items_from_db}
     inventory_by_name = {item['name']: item for item in items_from_db if 'name' in item}
     col1, col2 = st.columns([2, 3])
     with col1:
         st.subheader("Añadir Artículos al Pedido")
-        add_method = st.radio("Método para añadir:", ("Manual", "Escáner de Código"))
+        add_method = st.radio("Método para añadir:", ("Manual", "Escáner de Código Rápido"))
         if add_method == "Manual":
             options = [""] + list(inventory_by_name.keys())
             selected_name = st.selectbox("Selecciona un artículo", options)
             if selected_name and st.button("Añadir al Pedido"):
                 item_to_add = inventory_by_name[selected_name]
-                st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
+                existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == item_to_add['id']), None)
+                if existing_item_index is not None:
+                    st.session_state.order_items[existing_item_index]['order_quantity'] += 1
+                else:
+                    st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
                 st.rerun()
-        elif add_method == "Escáner de Código":
-            barcode_img = st.camera_input("Apunta al código de barras", key="order_scanner")
+        elif add_method == "Escáner de Código Rápido":
+            st.info("El escáner está activo. Cada código detectado en la imagen se añadirá (o incrementará) al pedido actual.")
+            barcode_img = st.camera_input("Apunta la cámara a uno o varios códigos", key="order_scanner")
             if barcode_img:
-                decoded_objects = decode(Image.open(barcode_img))
-                if decoded_objects:
-                    code = decoded_objects[0].data.decode('utf-8')
-                    if code in inventory_by_id:
-                        st.session_state.scanned_item_data = {'code': code, 'item': inventory_by_id[code]}
-                        st.rerun()
+                with st.spinner("Procesando imagen..."):
+                    decoded_objects = enhanced_barcode_reader(Image.open(barcode_img))
+                    if not decoded_objects:
+                        st.warning("No se detectaron códigos en la imagen.")
                     else:
-                        st.error(f"El código '{code}' no se encontró en el inventario.")
-                        st.session_state.scanned_item_data = None
-            if st.session_state.scanned_item_data:
-                item = st.session_state.scanned_item_data['item']
-                st.success(f"Artículo escaneado: **{item['name']}**")
-                quantity_to_add = st.number_input("Cantidad a añadir:", min_value=1, value=1, key="scanned_qty")
-                if st.button("Confirmar y Añadir al Pedido", type="primary"):
-                    st.session_state.order_items.append(dict(item, **{'order_quantity': quantity_to_add}))
-                    st.session_state.scanned_item_data = None
-                    st.rerun()
+                        items_changed = False
+                        for obj in decoded_objects:
+                            code = obj.data.decode('utf-8')
+                            if code in inventory_by_id:
+                                item_to_add = inventory_by_id[code]
+                                existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == code), None)
+                                if existing_item_index is not None:
+                                    st.session_state.order_items[existing_item_index]['order_quantity'] += 1
+                                    st.toast(f"Cantidad de '{item_to_add['name']}' actualizada.", icon="🔄")
+                                else:
+                                    st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
+                                    st.toast(f"'{item_to_add['name']}' añadido al pedido.", icon="✅")
+                                items_changed = True
+                            else:
+                                st.error(f"El código '{code}' no se encontró en el inventario.")
+                        if items_changed:
+                            st.rerun()
     with col2:
         st.subheader("Detalle del Pedido Actual")
         if not st.session_state.order_items:
@@ -462,16 +478,12 @@ elif st.session_state.page == "🛒 Pedidos":
                 if c2.button("❌ Cancelar Pedido", key=f"canc_{order['id']}", use_container_width=True):
                     firebase.cancel_order(order['id']); st.rerun()
 
-# ----------------------------------
-# PÁGINA: ANALÍTICA
-# ----------------------------------
 elif st.session_state.page == "📊 Analítica":
     try:
         completed_orders = firebase.get_orders('completed')
         all_inventory_items = firebase.get_all_inventory_items()
     except Exception as e:
         st.error(f"No se pudieron cargar los datos para el análisis: {e}"); st.stop()
-
     if not completed_orders:
         st.info("No hay pedidos completados para generar analíticas.")
     else:
@@ -502,7 +514,6 @@ elif st.session_state.page == "📊 Analítica":
                 st.line_chart(df_trends)
             else:
                 st.warning("No hay suficientes datos de fecha para generar un gráfico de tendencias.")
-
         with tab2:
             all_items_sold = [ing for o in completed_orders for ing in o.get('ingredients', [])]
             item_sales = {}
@@ -525,12 +536,9 @@ elif st.session_state.page == "📊 Analítica":
                 st.dataframe(df_profits.head(5), hide_index=True)
             st.markdown("---")
             st.subheader("Inventario de Lenta Rotación (no vendido en los últimos 30 días)")
-            
             thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-            
             sold_item_ids = {ing['id'] for o in completed_orders if o.get('timestamp_obj') and o['timestamp_obj'].replace(tzinfo=timezone.utc) > thirty_days_ago for ing in o.get('ingredients', [])}
             slow_moving_items = [item for item in all_inventory_items if item['id'] not in sold_item_ids]
-            
             if not slow_moving_items:
                 st.success("¡Todos los artículos han tenido movimiento en los últimos 30 días!")
             else:
@@ -560,9 +568,6 @@ elif st.session_state.page == "📊 Analítica":
                     except Exception as e:
                         st.error(f"No se pudo generar la predicción: {e}")
 
-# ----------------------------------
-# PÁGINA: ACERCA DE
-# ----------------------------------
 elif st.session_state.page == "👥 Acerca de":
     st.header("Sobre el Proyecto y sus Creadores")
     with st.container(border=True):
