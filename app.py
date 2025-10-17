@@ -29,7 +29,7 @@ except ImportError as e:
 
 # --- CONFIGURACIÓN DE PÁGINA Y ESTILOS ---
 st.set_page_config(
-    page_title="HI-DRIVE | Gestión Avanzada de Inventario",
+    page_title="SAVA | Gestión Avanzada de Inventario",
     page_icon="🧠",
     layout="wide"
 )
@@ -110,8 +110,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 
-| Gestión Avanzada de Inventario")
+st.sidebar.title("SAVA| Gestión de Inventarios")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -614,6 +613,7 @@ elif st.session_state.page == "👥 Acerca de":
                 - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
                 """
             )
+
 
 
 
