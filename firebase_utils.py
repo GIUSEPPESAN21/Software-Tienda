@@ -273,4 +273,3 @@ class FirebaseManager:
         except Exception as e:
             logger.error(f"Error al eliminar proveedor: {e}")
             raise
-
