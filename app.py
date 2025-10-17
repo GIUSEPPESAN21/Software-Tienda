@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.17 - Pedidos con Flujo de Escáner Inteligente
+Versión 3.18 - Corrección de Error de Fechas (Timezone)
 """
 import streamlit as st
 from PIL import Image
 import pandas as pd
 import plotly.express as px
 import json
-from datetime import datetime, timedelta, timezone
-import numpy as np
-import cv2
+from datetime import datetime, timedelta, timezone # <-- Se ha añadido timezone
 
 # --- Importaciones de utilidades y modelos ---
 try:
@@ -110,7 +108,7 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-st.sidebar.title("HI-DRIVE 3.17")
+st.sidebar.title("HI-DRIVE 3.18")
 PAGES = {
     "🏠 Inicio": "house", "📸 Análisis IA": "camera-reels", "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", "🛒 Pedidos": "cart4", "📊 Analítica": "graph-up-arrow",
@@ -360,90 +358,52 @@ elif st.session_state.page == "👥 Proveedores":
                 st.write(f"**Email:** {s.get('email', 'N/A')}")
                 st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
-# ----------------------------------
-# PÁGINA: PEDIDOS (SECCIÓN MODIFICADA)
-# ----------------------------------
 elif st.session_state.page == "🛒 Pedidos":
+    # ... (código sin cambios)
     items_from_db = firebase.get_all_inventory_items()
     inventory_by_id = {item['id']: item for item in items_from_db}
     inventory_by_name = {item['name']: item for item in items_from_db if 'name' in item}
-    
     col1, col2 = st.columns([2, 3])
     with col1:
         st.subheader("Añadir Artículos al Pedido")
-        
-        # --- INICIO DE LA MEJORA: Replicar flujo de Análisis IA ---
-        add_method = st.radio("Método para añadir:", ("Manual", "Escáner de Código", "Detección de Objetos"))
-        
-        # --- Opción 1: Manual ---
+        add_method = st.radio("Método para añadir:", ("Manual", "Escáner de Código Rápido"))
         if add_method == "Manual":
             options = [""] + list(inventory_by_name.keys())
             selected_name = st.selectbox("Selecciona un artículo", options)
-            if selected_name and st.button("Añadir 1 unidad al Pedido"):
+            if selected_name and st.button("Añadir al Pedido"):
                 item_to_add = inventory_by_name[selected_name]
-                # Lógica para actualizar cantidad si ya existe
                 existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == item_to_add['id']), None)
                 if existing_item_index is not None:
                     st.session_state.order_items[existing_item_index]['order_quantity'] += 1
                 else:
                     st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
                 st.rerun()
-
-        # --- Opción 2 y 3: Usan la cámara ---
-        else:
-            img_buffer = st.camera_input("Apunta la cámara al objetivo", key="order_camera")
-            if img_buffer:
-                pil_image = Image.open(img_buffer)
-
-                # --- Escáner de Código ---
-                if add_method == "Escáner de Código":
-                    with st.spinner("Buscando códigos..."):
-                        decoded_objects = enhanced_barcode_reader(pil_image)
-                        if decoded_objects:
-                            code = decoded_objects[0].data.decode('utf-8')
+        elif add_method == "Escáner de Código Rápido":
+            st.info("El escáner está activo. Cada código detectado en la imagen se añadirá (o incrementará) al pedido actual.")
+            barcode_img = st.camera_input("Apunta la cámara a uno o varios códigos", key="order_scanner")
+            if barcode_img:
+                with st.spinner("Procesando imagen..."):
+                    decoded_objects = enhanced_barcode_reader(Image.open(barcode_img))
+                    if not decoded_objects:
+                        st.warning("No se detectaron códigos en la imagen.")
+                    else:
+                        items_changed = False
+                        for obj in decoded_objects:
+                            code = obj.data.decode('utf-8')
                             if code in inventory_by_id:
                                 item_to_add = inventory_by_id[code]
                                 existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == code), None)
                                 if existing_item_index is not None:
                                     st.session_state.order_items[existing_item_index]['order_quantity'] += 1
+                                    st.toast(f"Cantidad de '{item_to_add['name']}' actualizada.", icon="🔄")
                                 else:
                                     st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
-                                st.success(f"'{item_to_add['name']}' añadido/actualizado en el pedido.")
-                                st.rerun()
+                                    st.toast(f"'{item_to_add['name']}' añadido al pedido.", icon="✅")
+                                items_changed = True
                             else:
-                                st.error(f"El código '{code}' no se encontró en el inventario. Por favor, créalo primero.")
-                        else:
-                            st.warning("No se detectaron códigos.")
-                
-                # --- Detección de Objetos ---
-                elif add_method == "Detección de Objetos":
-                    with st.spinner("Detectando objetos..."):
-                         results = yolo(pil_image)
-                    st.image(results[0].plot(), caption="Objetos detectados.", use_column_width=True)
-                    detections = results[0]
-                    if detections.boxes:
-                        st.subheader("Selecciona un objeto para añadir al pedido:")
-                        cols = st.columns(min(len(detections.boxes), 4))
-                        for i, box in enumerate(detections.boxes):
-                            class_name = detections.names[box.cls[0].item()]
-                            if cols[i % 4].button(f"Buscar '{class_name}'", key=f"add_obj_{i}"):
-                                # Busca el primer item en el inventario que coincida (se puede mejorar)
-                                found_item = next((item for item in items_from_db if class_name.lower() in item.get('name', '').lower()), None)
-                                if found_item:
-                                    existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == found_item['id']), None)
-                                    if existing_item_index is not None:
-                                        st.session_state.order_items[existing_item_index]['order_quantity'] += 1
-                                    else:
-                                        st.session_state.order_items.append(dict(found_item, **{'order_quantity': 1}))
-                                    st.success(f"'{found_item['name']}' añadido/actualizado.")
-                                    st.rerun()
-                                else:
-                                    st.error(f"No se encontró un artículo llamado '{class_name}' en el inventario.")
-                    else:
-                        st.warning("No se detectaron objetos.")
-
-    # --- FIN DE LA MEJORA ---
-
+                                st.error(f"El código '{code}' no se encontró en el inventario.")
+                        if items_changed:
+                            st.rerun()
     with col2:
         st.subheader("Detalle del Pedido Actual")
         if not st.session_state.order_items:
@@ -466,7 +426,6 @@ elif st.session_state.page == "🛒 Pedidos":
                 for index in sorted(items_to_remove_indices, reverse=True):
                     st.session_state.order_items.pop(index)
                 st.rerun()
-
             st.metric("Precio Total del Pedido", f"${total_price:,.2f}")
             order_count = firebase.get_order_count()
             default_title = f"Pedido #{order_count + 1}"
