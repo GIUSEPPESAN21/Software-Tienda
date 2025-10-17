@@ -3,30 +3,33 @@ from firebase_admin import credentials, firestore
 import json
 import base64
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 import streamlit as st
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- LÓGICA DE TRANSACCIÓN ATÓMICA ---
+# --- INICIO DE LA CORRECCIÓN: LÓGICA DE TRANSACCIÓN ATÓMICA ---
 @firestore.transactional
 def _complete_order_atomic(transaction, db, order_id):
     """
-    Operación transaccional para completar un pedido. Garantiza que la actualización
-    del stock y el estado del pedido ocurran de forma atómica (todo o nada).
+    Operación transaccional para completar un pedido.
+    Se realizan todas las lecturas primero, y luego todas las escrituras
+    para evitar el error 'Attempted read after write'.
     """
     order_ref = db.collection('orders').document(order_id)
     order_snapshot = order_ref.get(transaction=transaction)
+    
     if not order_snapshot.exists:
         raise ValueError("El pedido no existe.")
     
     order_data = order_snapshot.to_dict()
-    low_stock_alerts = []
-
+    
+    # --- PASO 1: LEER TODOS LOS DATOS NECESARIOS ---
+    items_to_update = []
     for ing in order_data.get('ingredients', []):
         if 'id' not in ing:
-            raise ValueError(f"Dato inconsistente: al ingrediente '{ing.get('name')}' le falta su ID.")
+            raise ValueError(f"Dato inconsistente en el pedido: al ingrediente '{ing.get('name')}' le falta su ID.")
 
         item_ref = db.collection('inventory').document(ing['id'])
         item_snapshot = item_ref.get(transaction=transaction)
@@ -41,25 +44,40 @@ def _complete_order_atomic(transaction, db, order_id):
             raise ValueError(f"Stock insuficiente para '{ing.get('name', ing['id'])}'. Se necesitan {ing['quantity']}, hay {current_quantity}.")
         
         new_quantity = current_quantity - ing['quantity']
-        transaction.update(item_ref, {'quantity': new_quantity})
+        items_to_update.append({
+            'ref': item_ref,
+            'new_quantity': new_quantity,
+            'item_data': item_data,
+            'ing_quantity': ing['quantity']
+        })
 
-        # Registrar en el historial de movimientos
-        history_ref = item_ref.collection('history').document()
+    # --- PASO 2: REALIZAR TODAS LAS ESCRITURAS ---
+    low_stock_alerts = []
+    for item_update in items_to_update:
+        # 2a: Actualizar el stock del inventario
+        transaction.update(item_update['ref'], {'quantity': item_update['new_quantity']})
+        
+        # 2b: Registrar en el historial de movimientos
+        history_ref = item_update['ref'].collection('history').document()
         history_data = {
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "type": "Venta (Pedido)",
-            "quantity_change": -ing['quantity'],
+            "quantity_change": -item_update['ing_quantity'],
             "details": f"Pedido ID: {order_id} - {order_data.get('title', 'N/A')}"
         }
         transaction.set(history_ref, history_data)
+        
+        # Comprobar si se alcanzó el umbral de stock bajo
+        min_stock_alert = item_update['item_data'].get('min_stock_alert')
+        if min_stock_alert and 0 < item_update['new_quantity'] <= min_stock_alert:
+            low_stock_alerts.append(f"'{item_update['item_data'].get('name')}' ha alcanzado el umbral de stock mínimo ({item_update['new_quantity']}/{min_stock_alert}).")
 
-        # Comprobar alerta de stock mínimo
-        min_stock_alert = item_data.get('min_stock_alert', 0)
-        if 0 < new_quantity <= min_stock_alert:
-            low_stock_alerts.append(f"'{item_data.get('name')}' ha alcanzado el umbral de stock mínimo ({new_quantity}/{min_stock_alert}).")
-
-    transaction.update(order_ref, {'status': 'completed', 'completed_at': datetime.now()})
+    # 2c: Actualizar el estado del pedido
+    transaction.update(order_ref, {'status': 'completed', 'completed_at': datetime.now(timezone.utc)})
+    
     return True, f"Pedido '{order_data['title']}' completado.", low_stock_alerts
+# --- FIN DE LA CORRECCIÓN ---
+
 
 class FirebaseManager:
     def __init__(self):
@@ -87,26 +105,25 @@ class FirebaseManager:
             raise
 
     # --- Métodos de Inventario ---
-    def save_inventory_item(self, data, custom_id, is_new=False):
+    def save_inventory_item(self, data, custom_id, is_new=False, details=None):
         try:
             doc_ref = self.db.collection('inventory').document(custom_id)
             doc_ref.set(data, merge=True)
             
             if is_new:
                 history_type = "Stock Inicial"
-                details = "Artículo creado en el sistema."
+                details = details or "Artículo creado en el sistema."
             else:
                 history_type = "Ajuste Manual"
-                details = "Artículo actualizado manualmente."
+                details = details or "Artículo actualizado manualmente."
             
             history_data = {
-                "timestamp": datetime.now(),
+                "timestamp": datetime.now(timezone.utc),
                 "type": history_type,
-                "quantity_change": data.get('quantity', 0),
+                "quantity_change": data.get('quantity'), # Puede ser None si solo se editan datos
                 "details": details
             }
             doc_ref.collection('history').add(history_data)
-
             logger.info(f"Elemento de inventario guardado/actualizado: {custom_id}")
         except Exception as e:
             logger.error(f"Error al guardar en 'inventory': {e}")
@@ -168,7 +185,6 @@ class FirebaseManager:
             raise
 
     def get_order_count(self):
-        """Cuenta el número total de documentos en la colección de pedidos."""
         try:
             count_query = self.db.collection('orders').count()
             count_result = count_query.get()
@@ -189,29 +205,20 @@ class FirebaseManager:
                 order = doc.to_dict()
                 order['id'] = doc.id
                 
-                # --- INICIO DE LA CORRECCIÓN ---
-                # Estandarizar el campo de la fecha antes de ordenar
                 ts = order.get('timestamp')
                 if isinstance(ts, str):
                     try:
-                        # Intentar convertir el string a un objeto datetime
-                        order['timestamp_obj'] = datetime.fromisoformat(ts)
+                        order['timestamp_obj'] = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
                     except (ValueError, TypeError):
-                        # Si falla la conversión, usar una fecha muy antigua por defecto
-                        order['timestamp_obj'] = datetime.min
+                        order['timestamp_obj'] = datetime.min.replace(tzinfo=timezone.utc)
                 elif isinstance(ts, datetime):
-                    # Si ya es un objeto datetime, simplemente usarlo
-                    order['timestamp_obj'] = ts
+                    order['timestamp_obj'] = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
                 else:
-                    # Si no existe o es de otro tipo, usar el valor por defecto
-                    order['timestamp_obj'] = datetime.min
-                # --- FIN DE LA CORRECCIÓN ---
+                    order['timestamp_obj'] = datetime.min.replace(tzinfo=timezone.utc)
                 
                 orders.append(order)
             
-            # Ordenar usando el nuevo campo que garantizamos que es de tipo datetime
             orders.sort(key=lambda x: x['timestamp_obj'], reverse=True)
-            
             return orders
         except Exception as e:
             logger.error(f"Error al obtener pedidos: {e}")
