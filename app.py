@@ -360,9 +360,6 @@ elif st.session_state.page == "👥 Proveedores":
                 st.write(f"**Email:** {s.get('email', 'N/A')}")
                 st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
-# ----------------------------------
-# PÁGINA: PEDIDOS (SECCIÓN MODIFICADA)
-# ----------------------------------
 elif st.session_state.page == "🛒 Pedidos":
     items_from_db = firebase.get_all_inventory_items()
     inventory_by_id = {item['id']: item for item in items_from_db}
@@ -372,30 +369,24 @@ elif st.session_state.page == "🛒 Pedidos":
     with col1:
         st.subheader("Añadir Artículos al Pedido")
         
-        # --- INICIO DE LA MEJORA: Replicar flujo de Análisis IA ---
         add_method = st.radio("Método para añadir:", ("Manual", "Escáner de Código", "Detección de Objetos"))
         
-        # --- Opción 1: Manual ---
         if add_method == "Manual":
             options = [""] + list(inventory_by_name.keys())
             selected_name = st.selectbox("Selecciona un artículo", options)
             if selected_name and st.button("Añadir 1 unidad al Pedido"):
                 item_to_add = inventory_by_name[selected_name]
-                # Lógica para actualizar cantidad si ya existe
                 existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == item_to_add['id']), None)
                 if existing_item_index is not None:
                     st.session_state.order_items[existing_item_index]['order_quantity'] += 1
                 else:
                     st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
                 st.rerun()
-
-        # --- Opción 2 y 3: Usan la cámara ---
         else:
             img_buffer = st.camera_input("Apunta la cámara al objetivo", key="order_camera")
             if img_buffer:
                 pil_image = Image.open(img_buffer)
 
-                # --- Escáner de Código ---
                 if add_method == "Escáner de Código":
                     with st.spinner("Buscando códigos..."):
                         decoded_objects = enhanced_barcode_reader(pil_image)
@@ -415,7 +406,6 @@ elif st.session_state.page == "🛒 Pedidos":
                         else:
                             st.warning("No se detectaron códigos.")
                 
-                # --- Detección de Objetos ---
                 elif add_method == "Detección de Objetos":
                     with st.spinner("Detectando objetos..."):
                          results = yolo(pil_image)
@@ -427,7 +417,6 @@ elif st.session_state.page == "🛒 Pedidos":
                         for i, box in enumerate(detections.boxes):
                             class_name = detections.names[box.cls[0].item()]
                             if cols[i % 4].button(f"Buscar '{class_name}'", key=f"add_obj_{i}"):
-                                # Busca el primer item en el inventario que coincida (se puede mejorar)
                                 found_item = next((item for item in items_from_db if class_name.lower() in item.get('name', '').lower()), None)
                                 if found_item:
                                     existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == found_item['id']), None)
@@ -441,9 +430,6 @@ elif st.session_state.page == "🛒 Pedidos":
                                     st.error(f"No se encontró un artículo llamado '{class_name}' en el inventario.")
                     else:
                         st.warning("No se detectaron objetos.")
-
-    # --- FIN DE LA MEJORA ---
-
     with col2:
         st.subheader("Detalle del Pedido Actual")
         if not st.session_state.order_items:
@@ -575,19 +561,40 @@ elif st.session_state.page == "📊 Analítica":
                     for item in order.get('ingredients', []):
                         if item.get('name') == item_to_predict and order.get('timestamp_obj'):
                             sales_history.append({'date': order['timestamp_obj'], 'quantity': item['quantity']})
-                if len(sales_history) < 5:
-                    st.warning("No hay suficientes datos de ventas para este artículo para una predicción fiable.")
+                
+                df_hist = pd.DataFrame(sales_history)
+                
+                # --- INICIO DE LA CORRECCIÓN: LÓGICA DE PREDICCIÓN MEJORADA ---
+                if df_hist.empty:
+                    st.warning("No hay historial de ventas para este artículo.")
                 else:
-                    df_hist = pd.DataFrame(sales_history)
                     df_hist['date'] = pd.to_datetime(df_hist['date'])
                     df_hist = df_hist.set_index('date').resample('D').sum().fillna(0)
-                    try:
-                        model = ExponentialSmoothing(df_hist['quantity'], seasonal='add', seasonal_periods=7).fit()
-                        prediction = model.forecast(30)
-                        st.success(f"Se estima una demanda de **{int(prediction.sum())} unidades** para los próximos 30 días.")
-                        st.line_chart(prediction)
-                    except Exception as e:
-                        st.error(f"No se pudo generar la predicción: {e}")
+
+                    MIN_DAYS_FOR_SEASONAL = 14  # 2 ciclos de 7 días
+                    MIN_DAYS_FOR_SIMPLE = 5
+
+                    if len(df_hist) < MIN_DAYS_FOR_SIMPLE:
+                        st.warning(f"No hay suficientes datos para una predicción fiable. Se necesitan al menos {MIN_DAYS_FOR_SIMPLE} días de ventas.")
+                    else:
+                        try:
+                            model = None
+                            if len(df_hist) >= MIN_DAYS_FOR_SEASONAL:
+                                st.info("Datos suficientes. Usando modelo de predicción estacional.")
+                                model = ExponentialSmoothing(df_hist['quantity'], seasonal='add', seasonal_periods=7, trend='add').fit()
+                            else:
+                                st.info("Datos insuficientes para estacionalidad. Usando modelo de tendencia simple.")
+                                model = ExponentialSmoothing(df_hist['quantity'], trend='add').fit()
+                            
+                            prediction = model.forecast(30)
+                            prediction[prediction < 0] = 0 # Evitar predicciones negativas
+                            
+                            st.success(f"Se estima una demanda de **{int(round(prediction.sum()))} unidades** para los próximos 30 días.")
+                            st.line_chart(prediction)
+                        except Exception as e:
+                            st.error(f"No se pudo generar la predicción: {e}")
+                # --- FIN DE LA CORRECCIÓN ---
+
 
 elif st.session_state.page == "👥 Acerca de":
     st.header("Sobre el Proyecto y sus Creadores")
