@@ -116,7 +116,7 @@ def send_whatsapp_alert(message):
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
 # --- MEJORA DE INTERFAZ: Sidebar con logo y título centrado/más grande ---
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", use_container_width=True)
+st.sidebar.image("https://github.com/GIUSEPPESAN21/sava-assets/blob/main/logo_sava.png?raw=true", use_container_width=True)
 st.sidebar.markdown('<h1 style="text-align: center; font-size: 2.2rem; margin-top: -20px;">OSIRIS</h1>', unsafe_allow_html=True)
 st.sidebar.markdown("<p style='text-align: center; margin-top: -15px;'>by <strong>SAVA</strong></p>", unsafe_allow_html=True)
 
@@ -788,6 +788,7 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
         st.info("**Jaime Eduardo Aragon Campo**\n\n*Director de Operaciones*")
     with c3:
         st.info("**Joseph Javier Sanchez Acuña**\n\n*Director de Proyecto*")
+
 
 
 
