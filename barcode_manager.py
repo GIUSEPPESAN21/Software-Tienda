@@ -97,3 +97,4 @@ class BarcodeManager:
         except Exception as e:
             logger.error(f"Error al añadir artículo a la venta '{barcode}': {e}")
             return current_sale_items, {'status': 'error', 'message': str(e)}
+
