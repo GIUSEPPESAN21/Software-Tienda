@@ -743,7 +743,7 @@ elif st.session_state.page == "📊 Analítica":
                             st.error(f"No se pudo generar la predicción: {e}")
 
 elif st.session_state.page == "🏢 Acerca de SAVA":
-    st.image("https://github.com/GIUSEPPESAN21/sava-assets/blob/main/logo_sava.png?raw=true", width=150)
+    st.image("https://github.com/GIUSEPPESAN21/sava-assets/blob/main/logo_sava.png?raw=true", width=250)
     st.title("Sobre SAVA")
     st.subheader("Innovación y Tecnología para el Retail del Futuro")
     
@@ -788,6 +788,7 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
         st.info("**Jaime Eduardo Aragon Campo**\n\n*Director de Operaciones*")
     with c3:
         st.info("**Joseph Javier Sanchez Acuña**\n\n*Director de Proyecto*")
+
 
 
 
