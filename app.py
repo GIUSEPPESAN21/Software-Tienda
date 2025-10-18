@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.18 - Funcionalidad Completa + Escáner USB Integrado
+Versión 3.19 - Mejoras de Búsqueda y Pedidos por Código
 """
 import streamlit as st
 from PIL import Image
@@ -18,7 +18,6 @@ try:
     from skimage.filters import threshold_local
     from firebase_utils import FirebaseManager
     from gemini_utils import GeminiUtils
-    # --- NUEVA IMPORTACIÓN ---
     from barcode_manager import BarcodeManager 
     from ultralytics import YOLO
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -72,18 +71,15 @@ def initialize_services():
         yolo_model = YOLO('yolov8m.pt')
         firebase_handler = FirebaseManager()
         gemini_handler = GeminiUtils()
-        # --- NUEVA INICIALIZACIÓN ---
         barcode_handler = BarcodeManager(firebase_handler)
         
         twilio_client = None
         if IS_TWILIO_AVAILABLE and all(k in st.secrets for k in ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]):
             twilio_client = Client(st.secrets["TWILIO_ACCOUNT_SID"], st.secrets["TWILIO_AUTH_TOKEN"])
             
-        # --- DEVOLVER NUEVO SERVICIO ---
         return yolo_model, firebase_handler, gemini_handler, twilio_client, barcode_handler
     except Exception as e:
         st.error(f"**Error Crítico de Inicialización:** {e}")
-        # --- ACTUALIZAR RETORNO EN CASO DE ERROR ---
         return None, None, None, None, None
 
 yolo, firebase, gemini, twilio_client, barcode_manager = initialize_services()
@@ -96,7 +92,6 @@ def init_session_state():
     defaults = {
         'page': "🏠 Inicio", 'order_items': [], 'analysis_results': None,
         'editing_item_id': None, 'scanned_item_data': None,
-        # --- NUEVOS ESTADOS PARA ESCÁNER USB ---
         'usb_scan_result': None, 'usb_sale_items': []
     }
     for key, value in defaults.items():
@@ -124,7 +119,7 @@ st.sidebar.title("OSIRIS")
 PAGES = {
     "🏠 Inicio": "house", 
     "📸 Análisis IA": "camera-reels", 
-    "🛰️ Escáner USB": "upc-scan", # --- NUEVA PÁGINA ---
+    "🛰️ Escáner USB": "upc-scan",
     "📦 Inventario": "box-seam",
     "👥 Proveedores": "people", 
     "🛒 Pedidos": "cart4", 
@@ -134,7 +129,6 @@ PAGES = {
 for page_name, icon in PAGES.items():
     if st.sidebar.button(f"{page_name}", use_container_width=True, type="primary" if st.session_state.page == page_name else "secondary"):
         st.session_state.page = page_name
-        # Limpiar estados específicos al cambiar de página para evitar datos residuales
         st.session_state.analysis_results = None
         st.session_state.editing_item_id = None
         st.session_state.scanned_item_data = None
@@ -151,6 +145,7 @@ st.markdown("<hr>", unsafe_allow_html=True)
 
 # --- PÁGINAS ---
 if st.session_state.page == "🏠 Inicio":
+    # El código de esta página no ha cambiado
     st.subheader("Plataforma de gestión inteligente para un control total sobre su inventario.")
     try:
         items = firebase.get_all_inventory_items()
@@ -182,6 +177,7 @@ if st.session_state.page == "🏠 Inicio":
                 st.warning(f"**{item['name']}**: {item['quantity']} unidades restantes (Umbral: {item['min_stock_alert']})")
 
 elif st.session_state.page == "📸 Análisis IA":
+    # El código de esta página no ha cambiado
     st.info("Usa la detección de objetos para un análisis detallado o el escáner de códigos para una gestión rápida de inventario.")
     source_options = ["🧠 Detección de Objetos", "║█║ Escáner de Código"]
     img_source = st.selectbox("Selecciona el modo de análisis:", source_options)
@@ -286,6 +282,7 @@ elif st.session_state.page == "📸 Análisis IA":
                         st.success(f"Información vinculada a '{selected_item_name}'.")
 
 elif st.session_state.page == "🛰️ Escáner USB":
+    # El código de esta página no ha cambiado
     st.info("Conecta tu lector de códigos de barras USB. Haz clic en el campo de texto y comienza a escanear.")
 
     mode = st.radio("Selecciona el modo de operación:", 
@@ -410,6 +407,7 @@ elif st.session_state.page == "🛰️ Escáner USB":
                     st.rerun()
 
 elif st.session_state.page == "📦 Inventario":
+    # --- INICIO DE LA MEJORA 1: BUSCADOR DE INVENTARIO ---
     if st.session_state.editing_item_id:
         item_to_edit = firebase.get_inventory_item_details(st.session_state.editing_item_id)
         st.subheader(f"✏️ Editando: {item_to_edit.get('name')}")
@@ -439,12 +437,24 @@ elif st.session_state.page == "📦 Inventario":
     else:
         tab1, tab2 = st.tabs(["📋 Inventario Actual", "➕ Añadir Artículo"])
         with tab1:
-            st.info("Haz clic en '✏️' en cualquier artículo para editar sus detalles.")
+            search_query = st.text_input(" Buscar por Nombre o Código/ID", placeholder="Ej: Laptop, 750100100200")
+            
             items = firebase.get_all_inventory_items()
-            if not items:
-                st.info("El inventario está vacío.")
+            
+            if search_query:
+                search_query_lower = search_query.lower()
+                filtered_items = [
+                    item for item in items if 
+                    search_query_lower in item.get('name', '').lower() or 
+                    search_query_lower in item.get('id', '').lower()
+                ]
             else:
-                for item in items:
+                filtered_items = items
+
+            if not filtered_items:
+                st.info("No se encontraron productos que coincidan con la búsqueda.")
+            else:
+                for item in filtered_items:
                     with st.container(border=True):
                         c1, c2, c3, c4 = st.columns([4, 2, 2, 1])
                         c1.markdown(f"**{item.get('name', 'N/A')}**"); c1.caption(f"ID: {item.get('id', 'N/A')}")
@@ -452,6 +462,7 @@ elif st.session_state.page == "📦 Inventario":
                         c3.metric("Precio Venta", f"${item.get('sale_price', 0):,.2f}")
                         if c4.button("✏️", key=f"edit_{item['id']}", help="Editar este artículo"):
                             st.session_state.editing_item_id = item['id']; st.rerun()
+        # --- FIN DE LA MEJORA 1 ---
         with tab2:
             st.subheader("Añadir Nuevo Artículo al Inventario")
             suppliers = firebase.get_all_suppliers()
@@ -475,6 +486,7 @@ elif st.session_state.page == "📦 Inventario":
                         st.error("ID no válido, vacío o ya existente.")
 
 elif st.session_state.page == "👥 Proveedores":
+    # El código de esta página no ha cambiado
     col1, col2 = st.columns([1, 2])
     with col1:
         with st.form("add_supplier_form", clear_on_submit=True):
@@ -498,99 +510,87 @@ elif st.session_state.page == "👥 Proveedores":
                 st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
 elif st.session_state.page == "🛒 Pedidos":
+    # --- INICIO DE LA MEJORA 2: PEDIDOS POR CÓDIGO ---
     items_from_db = firebase.get_all_inventory_items()
-    inventory_by_id = {item['id']: item for item in items_from_db}
-    inventory_by_name = {item['name']: item for item in items_from_db if 'name' in item}
     
     col1, col2 = st.columns([2, 3])
     with col1:
         st.subheader("Añadir Artículos al Pedido")
         
-        add_method = st.radio("Método para añadir:", ("Manual", "Escáner de Código", "Detección de Objetos"))
+        add_method = st.radio("Método para añadir:", ("Escanear para Pedido", "Selección Manual"), horizontal=True)
         
-        if add_method == "Manual":
+        if add_method == "Selección Manual":
+            inventory_by_name = {item['name']: item for item in items_from_db if 'name' in item}
             options = [""] + list(inventory_by_name.keys())
             selected_name = st.selectbox("Selecciona un artículo", options)
-            if selected_name and st.button("Añadir 1 unidad al Pedido"):
+            if selected_name:
                 item_to_add = inventory_by_name[selected_name]
-                existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == item_to_add['id']), None)
-                if existing_item_index is not None:
-                    st.session_state.order_items[existing_item_index]['order_quantity'] += 1
-                else:
-                    st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
-                st.rerun()
-        else:
-            img_buffer = st.camera_input("Apunta la cámara al objetivo", key="order_camera")
-            if img_buffer:
-                pil_image = Image.open(img_buffer)
+                qty_to_add = st.number_input(f"Cantidad de '{selected_name}'", min_value=1, value=1, step=1, key=f"sel_qty_{item_to_add['id']}")
+                if st.button(f"Añadir {qty_to_add} al Pedido", use_container_width=True):
+                    st.session_state.order_items, _ = barcode_manager.add_item_to_order_list(item_to_add, st.session_state.order_items, qty_to_add)
+                    st.rerun()
 
-                if add_method == "Escáner de Código":
-                    with st.spinner("Buscando códigos..."):
-                        decoded_objects = enhanced_barcode_reader(pil_image)
-                        if decoded_objects:
-                            code = decoded_objects[0].data.decode('utf-8')
-                            if code in inventory_by_id:
-                                item_to_add = inventory_by_id[code]
-                                existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == code), None)
-                                if existing_item_index is not None:
-                                    st.session_state.order_items[existing_item_index]['order_quantity'] += 1
-                                else:
-                                    st.session_state.order_items.append(dict(item_to_add, **{'order_quantity': 1}))
-                                st.success(f"'{item_to_add['name']}' añadido/actualizado en el pedido.")
-                                st.rerun()
-                            else:
-                                st.error(f"El código '{code}' no se encontró en el inventario. Por favor, créalo primero.")
-                        else:
-                            st.warning("No se detectaron códigos.")
-                
-                elif add_method == "Detección de Objetos":
-                    with st.spinner("Detectando objetos..."):
-                         results = yolo(pil_image)
-                    st.image(results[0].plot(), caption="Objetos detectados.", use_column_width=True)
-                    detections = results[0]
-                    if detections.boxes:
-                        st.subheader("Selecciona un objeto para añadir al pedido:")
-                        cols = st.columns(min(len(detections.boxes), 4))
-                        for i, box in enumerate(detections.boxes):
-                            class_name = detections.names[box.cls[0].item()]
-                            if cols[i % 4].button(f"Buscar '{class_name}'", key=f"add_obj_{i}"):
-                                found_item = next((item for item in items_from_db if class_name.lower() in item.get('name', '').lower()), None)
-                                if found_item:
-                                    existing_item_index = next((i for i, item in enumerate(st.session_state.order_items) if item['id'] == found_item['id']), None)
-                                    if existing_item_index is not None:
-                                        st.session_state.order_items[existing_item_index]['order_quantity'] += 1
-                                    else:
-                                        st.session_state.order_items.append(dict(found_item, **{'order_quantity': 1}))
-                                    st.success(f"'{found_item['name']}' añadido/actualizado.")
-                                    st.rerun()
-                                else:
-                                    st.error(f"No se encontró un artículo llamado '{class_name}' en el inventario.")
+        elif add_method == "Escanear para Pedido":
+            with st.form("order_scan_form"):
+                barcode_input = st.text_input("Escanear Código de Producto", key="order_barcode_scan")
+                submitted = st.form_submit_button("Buscar y Añadir", use_container_width=True)
+
+                if submitted and barcode_input:
+                    item_data = firebase.get_inventory_item_details(barcode_input)
+                    if item_data:
+                        st.session_state.order_items, status_msg = barcode_manager.add_item_to_order_list(item_data, st.session_state.order_items, 1)
+                        st.toast(status_msg['message'], icon="✅" if status_msg['status'] == 'success' else '⚠️')
                     else:
-                        st.warning("No se detectaron objetos.")
+                        st.error(f"El código '{barcode_input}' no fue encontrado en el inventario.")
+                    st.rerun()
+
     with col2:
         st.subheader("Detalle del Pedido Actual")
         if not st.session_state.order_items:
             st.info("Añade artículos para comenzar un pedido.")
         else:
             total_price = 0
-            items_to_remove_indices = []
+            
+            # Crear un DataFrame para una mejor visualización y edición
+            order_df_data = []
             for i, item in enumerate(st.session_state.order_items):
-                c1, c2, c3, c4 = st.columns([4,2,2,1])
-                c1.text(item['name'])
-                item_id = item.get('id', f'item_{i}')
-                new_qty = c2.number_input("Cantidad", value=item['order_quantity'], min_value=1, key=f"qty_{item_id}_{i}")
-                st.session_state.order_items[i]['order_quantity'] = new_qty
-                item_total = item.get('sale_price', 0) * new_qty
-                c3.text(f"${item_total:,.2f}")
-                total_price += item_total
-                if c4.button("🗑️", key=f"del_{item_id}_{i}"):
-                    items_to_remove_indices.append(i)
-            if items_to_remove_indices:
-                for index in sorted(items_to_remove_indices, reverse=True):
-                    st.session_state.order_items.pop(index)
-                st.rerun()
+                order_df_data.append({
+                    "id": item['id'],
+                    "Producto": item['name'],
+                    "Cantidad": item['order_quantity'],
+                    "Precio Unit.": item.get('sale_price', 0),
+                    "Subtotal": item.get('sale_price', 0) * item['order_quantity']
+                })
+            
+            order_df = pd.DataFrame(order_df_data)
 
+            # Mostrar la tabla editable
+            st.write("Puedes editar la cantidad directamente en la tabla:")
+            edited_df = st.data_editor(
+                order_df,
+                column_config={
+                    "id": None, # Ocultar la columna de ID
+                    "Producto": st.column_config.TextColumn(disabled=True),
+                    "Cantidad": st.column_config.NumberColumn(min_value=1, step=1),
+                    "Precio Unit.": st.column_config.NumberColumn(format="$%.2f", disabled=True),
+                    "Subtotal": st.column_config.NumberColumn(format="$%.2f", disabled=True)
+                },
+                hide_index=True,
+                use_container_width=True,
+                key="order_editor"
+            )
+
+            # Sincronizar cambios de la tabla al estado de sesión
+            if 'edited_rows' in st.session_state.order_editor:
+                for idx, changes in st.session_state.order_editor['edited_rows'].items():
+                    item_id = st.session_state.order_items[idx]['id']
+                    st.session_state.order_items[idx]['order_quantity'] = changes.get('Cantidad', st.session_state.order_items[idx]['order_quantity'])
+
+            # Recalcular el precio total
+            total_price = sum(item.get('sale_price', 0) * item['order_quantity'] for item in st.session_state.order_items)
+            
             st.metric("Precio Total del Pedido", f"${total_price:,.2f}")
+            
             order_count = firebase.get_order_count()
             default_title = f"Pedido #{order_count + 1}"
             with st.form("order_form"):
@@ -603,6 +603,8 @@ elif st.session_state.page == "🛒 Pedidos":
                     st.success(f"Pedido '{final_title}' creado con éxito.")
                     send_whatsapp_alert(f"🧾 Nuevo Pedido: {final_title} por ${total_price:,.2f}")
                     st.session_state.order_items = []; st.rerun()
+
+    # --- FIN DE LA MEJORA 2 ---
     st.markdown("---")
     st.subheader("⏳ Pedidos en Proceso")
     processing_orders = firebase.get_orders('processing')
@@ -626,6 +628,7 @@ elif st.session_state.page == "🛒 Pedidos":
                     firebase.cancel_order(order['id']); st.rerun()
 
 elif st.session_state.page == "📊 Analítica":
+    # El código de esta página no ha cambiado
     try:
         completed_orders = firebase.get_orders('completed')
         all_inventory_items = firebase.get_all_inventory_items()
@@ -731,6 +734,7 @@ elif st.session_state.page == "📊 Analítica":
                             st.error(f"No se pudo generar la predicción: {e}")
 
 elif st.session_state.page == "👥 Acerca de":
+    # El código de esta página no ha cambiado
     st.header("Sobre el Proyecto y sus Creadores")
     with st.container(border=True):
         col_img_est, col_info_est = st.columns([1, 3])
