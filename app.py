@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.21 - Refinamiento Visual de Marca
+Versión 2.0
 """
 import streamlit as st
 from PIL import Image
@@ -762,10 +762,10 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
     
     col1, col2 = st.columns([1, 4])
     with col1:
-        st.image("https://avatars.githubusercontent.com/u/129755299?v=4", width=150, caption="CEO")
+        st.image("https://uniminuto0-my.sharepoint.com/:i:/g/personal/joseph_sanchez_uniminuto_edu_co/Edg2YJyOVmtFtv6rqZgk2kQB8xvK-pywZLYpx2K0n1Axtw?e=LaGpOo", width=100, caption="CEO")
     with col2:
-        st.markdown("#### Joseph Sánchez Acuña")
-        st.markdown("**CEO y Arquitecto de Software**")
+        st.markdown("#### Joseph Javier Sánchez Acuña")
+        st.markdown("**CEO - SAVA SOFTWARE FOR ENGINEERING**")
         st.write("""
         Líder visionario con una profunda experiencia en inteligencia artificial y desarrollo de software.
         Joseph es el cerebro detrás de la arquitectura de OSIRIS, impulsando la innovación
@@ -783,9 +783,10 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.info("**Nombre del Socio 1**\n\n*Director de Operaciones*")
+        st.info("**Xammy Alexander Victoria Gonzalez**\n\n*Director Comercial*")
     with c2:
-        st.info("**Nombre del Socio 2**\n\n*Director de Tecnología*")
+        st.info("**Jaime Eduardo Aragon Campo**\n\n*Director de Operaciones*")
     with c3:
-        st.info("**Nombre del Socio 3**\n\n*Directora Comercial*")
+        st.info("**Joseph Javier Sanchez Acuña**\n\n*Director de Proyecto*")
+
 
