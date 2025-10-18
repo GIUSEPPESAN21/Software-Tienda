@@ -31,7 +31,7 @@ except ImportError as e:
 # --- CONFIGURACIÓN DE PÁGINA Y ESTILOS ---
 st.set_page_config(
     page_title="OSIRIS by SAVA",
-    page_icon="https://cdn-icons-png.flaticon.com/512/8128/8128087.png",
+    page_icon="https://github.com/GIUSEPPESAN21/sava-assets/blob/main/logo_sava.png?raw=true",
     layout="wide"
 )
 
@@ -788,6 +788,7 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
         st.info("**Jaime Eduardo Aragon Campo**\n\n*Director de Operaciones*")
     with c3:
         st.info("**Joseph Javier Sanchez Acuña**\n\n*Director de Proyecto*")
+
 
 
 
