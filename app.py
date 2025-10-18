@@ -762,7 +762,7 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
     
     col1, col2 = st.columns([1, 4])
     with col1:
-        st.image("https://uniminuto0-my.sharepoint.com/my?viewid=5fc3246f%2Da240%2D4ad9%2D99d7%2Dd28d7ed88392&id=%2Fpersonal%2Fjoseph%5Fsanchez%5Funiminuto%5Fedu%5Fco%2FDocuments%2FProgramas%2FSAVA%2Ejpg&parent=%2Fpersonal%2Fjoseph%5Fsanchez%5Funiminuto%5Fedu%5Fco%2FDocuments%2FProgramas", width=100, caption="CEO")
+        st.image("https://github.com/GIUSEPPESAN21/sava-assets/blob/main/logo_sava.png?raw=true", width=100, caption="CEO")
     with col2:
         st.markdown("#### Joseph Javier Sánchez Acuña")
         st.markdown("**CEO - SAVA SOFTWARE FOR ENGINEERING**")
@@ -788,6 +788,7 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
         st.info("**Jaime Eduardo Aragon Campo**\n\n*Director de Operaciones*")
     with c3:
         st.info("**Joseph Javier Sanchez Acuña**\n\n*Director de Proyecto*")
+
 
 
 
