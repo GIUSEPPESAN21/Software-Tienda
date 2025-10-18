@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.20 - Renovación de Interfaz y Marca
+Versión 3.20 - Refinamiento Visual de Marca
 """
 import streamlit as st
 from PIL import Image
@@ -117,10 +117,11 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
-# --- MEJORA DE INTERFAZ: Sidebar con logo de la empresa ---
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", width=80)
-st.sidebar.title("OSIRIS")
-st.sidebar.markdown("by **SAVA**")
+# --- MEJORA DE INTERFAZ: Sidebar con logo y título centrado/más grande ---
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", use_column_width=True)
+st.sidebar.markdown('<h1 style="text-align: center; font-size: 2.2rem; margin-top: -20px;">OSIRIS</h1>', unsafe_allow_html=True) # Título más grande y centrado
+st.sidebar.markdown("<p style='text-align: center; margin-top: -15px;'>by <strong>SAVA</strong></p>", unsafe_allow_html=True)
+
 
 PAGES = {
     "🏠 Inicio": "house", 
