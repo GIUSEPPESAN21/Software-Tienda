@@ -744,7 +744,7 @@ elif st.session_state.page == "📊 Analítica":
 
 elif st.session_state.page == "🏢 Acerca de SAVA":
     st.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", width=100)
-    st.title("Sobre SAVA")
+    st.title("Sobre SAVA SOFTWARE")
     st.subheader("Innovación y Tecnología para el Retail del Futuro")
     
     st.markdown("""
@@ -788,3 +788,4 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
         st.info("**Jaime Eduardo Aragon Campo**\n\n*Director de Operaciones*")
     with c3:
         st.info("**Joseph Javier Sanchez Acuña**\n\n*Director de Proyecto*")
+
