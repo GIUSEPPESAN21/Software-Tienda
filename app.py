@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.20 - Refinamiento Visual de Marca
+Versión 3.21 - Refinamiento Visual de Marca
 """
 import streamlit as st
 from PIL import Image
@@ -49,7 +49,6 @@ load_css()
 # --- LECTOR DE CÓDIGOS DE BARRAS POTENCIADO (PARA CÁMARA) ---
 def enhanced_barcode_reader(pil_image):
     try:
-        # El resto de la función permanece igual
         image_cv = np.array(pil_image.convert('RGB'))
         gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
         block_size = 41
@@ -69,14 +68,15 @@ def enhanced_barcode_reader(pil_image):
 @st.cache_resource
 def initialize_services():
     try:
-        # El resto de la función permanece igual
         yolo_model = YOLO('yolov8m.pt')
         firebase_handler = FirebaseManager()
         gemini_handler = GeminiUtils()
         barcode_handler = BarcodeManager(firebase_handler)
+        
         twilio_client = None
         if IS_TWILIO_AVAILABLE and all(k in st.secrets for k in ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]):
             twilio_client = Client(st.secrets["TWILIO_ACCOUNT_SID"], st.secrets["TWILIO_AUTH_TOKEN"])
+            
         return yolo_model, firebase_handler, gemini_handler, twilio_client, barcode_handler
     except Exception as e:
         st.error(f"**Error Crítico de Inicialización:** {e}")
@@ -89,7 +89,6 @@ if not all([yolo, firebase, gemini, barcode_manager]):
 
 # --- Funciones de Estado de Sesión ---
 def init_session_state():
-    # Esta función permanece igual
     defaults = {
         'page': "🏠 Inicio", 'order_items': [], 'analysis_results': None,
         'editing_item_id': None, 'scanned_item_data': None,
@@ -104,7 +103,6 @@ init_session_state()
 
 # --- LÓGICA DE NOTIFICACIONES ---
 def send_whatsapp_alert(message):
-    # Esta función permanece igual
     if not twilio_client:
         st.toast("Twilio no configurado. Alerta no enviada.", icon="⚠️")
         return
@@ -118,8 +116,8 @@ def send_whatsapp_alert(message):
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
 # --- MEJORA DE INTERFAZ: Sidebar con logo y título centrado/más grande ---
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", use_column_width=True)
-st.sidebar.markdown('<h1 style="text-align: center; font-size: 2.2rem; margin-top: -20px;">OSIRIS</h1>', unsafe_allow_html=True) # Título más grande y centrado
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", use_container_width=True)
+st.sidebar.markdown('<h1 style="text-align: center; font-size: 2.2rem; margin-top: -20px;">OSIRIS</h1>', unsafe_allow_html=True)
 st.sidebar.markdown("<p style='text-align: center; margin-top: -15px;'>by <strong>SAVA</strong></p>", unsafe_allow_html=True)
 
 
@@ -131,7 +129,7 @@ PAGES = {
     "👥 Proveedores": "people", 
     "🛒 Pedidos": "cart4", 
     "📊 Analítica": "graph-up-arrow",
-    "🏢 Acerca de SAVA": "building" # Texto del botón actualizado
+    "🏢 Acerca de SAVA": "building"
 }
 for page_name, icon in PAGES.items():
     if st.sidebar.button(f"{page_name}", use_container_width=True, type="primary" if st.session_state.page == page_name else "secondary"):
@@ -146,7 +144,6 @@ st.sidebar.markdown("---")
 st.sidebar.info("© 2025 SAVA. Todos los derechos reservados.")
 
 # --- RENDERIZADO DE PÁGINAS ---
-# No se muestra el título principal aquí para dar control total a cada página
 if st.session_state.page != "🏠 Inicio":
     st.markdown(f'<h1 class="main-header">{st.session_state.page}</h1>', unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
@@ -154,7 +151,6 @@ if st.session_state.page != "🏠 Inicio":
 
 # --- PÁGINAS ---
 if st.session_state.page == "🏠 Inicio":
-    # --- MEJORA DE INTERFAZ: Nueva Página de Inicio ---
     st.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", width=120)
     st.markdown('<h1 class="main-header" style="text-align: left;">Bienvenido a OSIRIS</h1>', unsafe_allow_html=True)
     st.subheader("La solución de gestión de inventario inteligente de SAVA")
@@ -201,7 +197,6 @@ if st.session_state.page == "🏠 Inicio":
                     st.warning(f"**{item['name']}**: {item['quantity']} unidades restantes (Umbral: {item['min_stock_alert']})")
 
 elif st.session_state.page == "📸 Análisis IA":
-    # El código de esta página no ha cambiado
     st.info("Usa la detección de objetos para un análisis detallado o el escáner de códigos para una gestión rápida de inventario.")
     source_options = ["🧠 Detección de Objetos", "║█║ Escáner de Código"]
     img_source = st.selectbox("Selecciona el modo de análisis:", source_options)
@@ -306,7 +301,6 @@ elif st.session_state.page == "📸 Análisis IA":
                         st.success(f"Información vinculada a '{selected_item_name}'.")
 
 elif st.session_state.page == "🛰️ Escáner USB":
-    # El código de esta página no ha cambiado
     st.info("Conecta tu lector de códigos de barras USB. Haz clic en el campo de texto y comienza a escanear.")
 
     mode = st.radio("Selecciona el modo de operación:", 
@@ -431,7 +425,6 @@ elif st.session_state.page == "🛰️ Escáner USB":
                     st.rerun()
 
 elif st.session_state.page == "📦 Inventario":
-    # El código de esta página no ha cambiado
     if st.session_state.editing_item_id:
         item_to_edit = firebase.get_inventory_item_details(st.session_state.editing_item_id)
         st.subheader(f"✏️ Editando: {item_to_edit.get('name')}")
@@ -509,7 +502,6 @@ elif st.session_state.page == "📦 Inventario":
                         st.error("ID no válido, vacío o ya existente.")
 
 elif st.session_state.page == "👥 Proveedores":
-    # El código de esta página no ha cambiado
     col1, col2 = st.columns([1, 2])
     with col1:
         with st.form("add_supplier_form", clear_on_submit=True):
@@ -533,7 +525,6 @@ elif st.session_state.page == "👥 Proveedores":
                 st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
 elif st.session_state.page == "🛒 Pedidos":
-    # El código de esta página no ha cambiado
     items_from_db = firebase.get_all_inventory_items()
     
     col1, col2 = st.columns([2, 3])
@@ -601,10 +592,11 @@ elif st.session_state.page == "🛒 Pedidos":
                 key="order_editor"
             )
 
+            # Sincronizar cambios de la tabla al estado de sesión
             if 'edited_rows' in st.session_state.order_editor:
                 for idx, changes in st.session_state.order_editor['edited_rows'].items():
-                    item_id = st.session_state.order_items[idx]['id']
-                    st.session_state.order_items[idx]['order_quantity'] = changes.get('Cantidad', st.session_state.order_items[idx]['order_quantity'])
+                    if idx < len(st.session_state.order_items):
+                        st.session_state.order_items[idx]['order_quantity'] = changes.get('Cantidad', st.session_state.order_items[idx]['order_quantity'])
 
             total_price = sum(item.get('sale_price', 0) * item['order_quantity'] for item in st.session_state.order_items)
             
@@ -646,7 +638,6 @@ elif st.session_state.page == "🛒 Pedidos":
                     firebase.cancel_order(order['id']); st.rerun()
 
 elif st.session_state.page == "📊 Analítica":
-    # El código de esta página no ha cambiado
     try:
         completed_orders = firebase.get_orders('completed')
         all_inventory_items = firebase.get_all_inventory_items()
@@ -752,7 +743,6 @@ elif st.session_state.page == "📊 Analítica":
                             st.error(f"No se pudo generar la predicción: {e}")
 
 elif st.session_state.page == "🏢 Acerca de SAVA":
-    # --- MEJORA DE INTERFAZ: Nueva Página "Acerca de" ---
     st.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", width=150)
     st.title("Sobre SAVA")
     st.subheader("Innovación y Tecnología para el Retail del Futuro")
@@ -770,7 +760,6 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
     
     st.subheader("Nuestro Equipo Fundador")
     
-    # Perfil del CEO
     col1, col2 = st.columns([1, 4])
     with col1:
         st.image("https://avatars.githubusercontent.com/u/129755299?v=4", width=150, caption="CEO")
@@ -790,7 +779,6 @@ elif st.session_state.page == "🏢 Acerca de SAVA":
         )
     st.markdown("---")
     
-    # Perfiles de Cofundadores (puedes añadir más siguiendo el mismo patrón)
     st.markdown("##### Cofundadores")
     
     c1, c2, c3 = st.columns(3)
