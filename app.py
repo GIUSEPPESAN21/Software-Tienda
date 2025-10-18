@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HI-DRIVE: Sistema Avanzado de Gestión de Inventario con IA
-Versión 3.19 - Mejoras de Búsqueda y Pedidos por Código
+Versión 3.20 - Renovación de Interfaz y Marca
 """
 import streamlit as st
 from PIL import Image
@@ -30,8 +30,8 @@ except ImportError as e:
 
 # --- CONFIGURACIÓN DE PÁGINA Y ESTILOS ---
 st.set_page_config(
-    page_title="SAVA | Gestión Avanzada de Inventario",
-    page_icon="🧠",
+    page_title="OSIRIS by SAVA",
+    page_icon="https://cdn-icons-png.flaticon.com/512/8128/8128087.png",
     layout="wide"
 )
 
@@ -49,6 +49,7 @@ load_css()
 # --- LECTOR DE CÓDIGOS DE BARRAS POTENCIADO (PARA CÁMARA) ---
 def enhanced_barcode_reader(pil_image):
     try:
+        # El resto de la función permanece igual
         image_cv = np.array(pil_image.convert('RGB'))
         gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
         block_size = 41
@@ -68,15 +69,14 @@ def enhanced_barcode_reader(pil_image):
 @st.cache_resource
 def initialize_services():
     try:
+        # El resto de la función permanece igual
         yolo_model = YOLO('yolov8m.pt')
         firebase_handler = FirebaseManager()
         gemini_handler = GeminiUtils()
         barcode_handler = BarcodeManager(firebase_handler)
-        
         twilio_client = None
         if IS_TWILIO_AVAILABLE and all(k in st.secrets for k in ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]):
             twilio_client = Client(st.secrets["TWILIO_ACCOUNT_SID"], st.secrets["TWILIO_AUTH_TOKEN"])
-            
         return yolo_model, firebase_handler, gemini_handler, twilio_client, barcode_handler
     except Exception as e:
         st.error(f"**Error Crítico de Inicialización:** {e}")
@@ -89,6 +89,7 @@ if not all([yolo, firebase, gemini, barcode_manager]):
 
 # --- Funciones de Estado de Sesión ---
 def init_session_state():
+    # Esta función permanece igual
     defaults = {
         'page': "🏠 Inicio", 'order_items': [], 'analysis_results': None,
         'editing_item_id': None, 'scanned_item_data': None,
@@ -103,6 +104,7 @@ init_session_state()
 
 # --- LÓGICA DE NOTIFICACIONES ---
 def send_whatsapp_alert(message):
+    # Esta función permanece igual
     if not twilio_client:
         st.toast("Twilio no configurado. Alerta no enviada.", icon="⚠️")
         return
@@ -115,7 +117,11 @@ def send_whatsapp_alert(message):
         st.error(f"Error de Twilio: {e}", icon="🚨")
 
 # --- NAVEGACIÓN PRINCIPAL (SIDEBAR) ---
+# --- MEJORA DE INTERFAZ: Sidebar con logo de la empresa ---
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", width=80)
 st.sidebar.title("OSIRIS")
+st.sidebar.markdown("by **SAVA**")
+
 PAGES = {
     "🏠 Inicio": "house", 
     "📸 Análisis IA": "camera-reels", 
@@ -124,7 +130,7 @@ PAGES = {
     "👥 Proveedores": "people", 
     "🛒 Pedidos": "cart4", 
     "📊 Analítica": "graph-up-arrow",
-    "👥 Acerca de": "shield-check"
+    "🏢 Acerca de SAVA": "building" # Texto del botón actualizado
 }
 for page_name, icon in PAGES.items():
     if st.sidebar.button(f"{page_name}", use_container_width=True, type="primary" if st.session_state.page == page_name else "secondary"):
@@ -136,22 +142,34 @@ for page_name, icon in PAGES.items():
         st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.info("Desarrollado por Joseph Sánchez Acuña.")
+st.sidebar.info("© 2025 SAVA. Todos los derechos reservados.")
 
 # --- RENDERIZADO DE PÁGINAS ---
-page_title = st.session_state.page
-st.markdown(f'<h1 class="main-header">{page_title}</h1>', unsafe_allow_html=True)
-st.markdown("<hr>", unsafe_allow_html=True)
+# No se muestra el título principal aquí para dar control total a cada página
+if st.session_state.page != "🏠 Inicio":
+    st.markdown(f'<h1 class="main-header">{st.session_state.page}</h1>', unsafe_allow_html=True)
+    st.markdown("<hr>", unsafe_allow_html=True)
+
 
 # --- PÁGINAS ---
 if st.session_state.page == "🏠 Inicio":
-    # El código de esta página no ha cambiado
-    st.subheader("Plataforma de gestión inteligente para un control total sobre su inventario.")
+    # --- MEJORA DE INTERFAZ: Nueva Página de Inicio ---
+    st.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", width=120)
+    st.markdown('<h1 class="main-header" style="text-align: left;">Bienvenido a OSIRIS</h1>', unsafe_allow_html=True)
+    st.subheader("La solución de gestión de inventario inteligente de SAVA")
+    st.markdown("""
+    **OSIRIS** transforma la manera en que gestionas tu inventario, combinando inteligencia artificial de vanguardia
+    con una interfaz intuitiva para darte control, precisión y eficiencia sin precedentes.
+    """)
+    st.markdown("---")
+
+    st.subheader("Resumen del Negocio en Tiempo Real")
     try:
         items = firebase.get_all_inventory_items()
         orders = firebase.get_orders(status=None)
         suppliers = firebase.get_all_suppliers()
         total_inventory_value = sum(item.get('quantity', 0) * item.get('purchase_price', 0) for item in items)
+        
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("📦 Artículos Únicos", len(items))
         c2.metric("💰 Valor del Inventario", f"${total_inventory_value:,.2f}")
@@ -160,6 +178,7 @@ if st.session_state.page == "🏠 Inicio":
     except Exception as e:
         st.warning(f"No se pudieron cargar las estadísticas: {e}")
     st.markdown("---")
+
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Acciones Rápidas")
@@ -167,14 +186,18 @@ if st.session_state.page == "🏠 Inicio":
              st.session_state.page = "🛰️ Escáner USB"; st.rerun()
         if st.button("📝 Crear Nuevo Pedido", use_container_width=True):
             st.session_state.page = "🛒 Pedidos"; st.rerun()
+        if st.button("➕ Añadir Artículo", use_container_width=True):
+            st.session_state.page = "📦 Inventario"; st.rerun()
+            
     with col2:
         st.subheader("Alertas de Stock Bajo")
         low_stock_items = [item for item in items if item.get('min_stock_alert') and item.get('quantity', 0) <= item.get('min_stock_alert', 0)]
         if not low_stock_items:
             st.success("¡Todo el inventario está por encima del umbral mínimo!")
         else:
-            for item in low_stock_items:
-                st.warning(f"**{item['name']}**: {item['quantity']} unidades restantes (Umbral: {item['min_stock_alert']})")
+            with st.container(height=200):
+                for item in low_stock_items:
+                    st.warning(f"**{item['name']}**: {item['quantity']} unidades restantes (Umbral: {item['min_stock_alert']})")
 
 elif st.session_state.page == "📸 Análisis IA":
     # El código de esta página no ha cambiado
@@ -407,7 +430,7 @@ elif st.session_state.page == "🛰️ Escáner USB":
                     st.rerun()
 
 elif st.session_state.page == "📦 Inventario":
-    # --- INICIO DE LA MEJORA 1: BUSCADOR DE INVENTARIO ---
+    # El código de esta página no ha cambiado
     if st.session_state.editing_item_id:
         item_to_edit = firebase.get_inventory_item_details(st.session_state.editing_item_id)
         st.subheader(f"✏️ Editando: {item_to_edit.get('name')}")
@@ -462,7 +485,6 @@ elif st.session_state.page == "📦 Inventario":
                         c3.metric("Precio Venta", f"${item.get('sale_price', 0):,.2f}")
                         if c4.button("✏️", key=f"edit_{item['id']}", help="Editar este artículo"):
                             st.session_state.editing_item_id = item['id']; st.rerun()
-        # --- FIN DE LA MEJORA 1 ---
         with tab2:
             st.subheader("Añadir Nuevo Artículo al Inventario")
             suppliers = firebase.get_all_suppliers()
@@ -510,7 +532,7 @@ elif st.session_state.page == "👥 Proveedores":
                 st.write(f"**Teléfono:** {s.get('phone', 'N/A')}")
 
 elif st.session_state.page == "🛒 Pedidos":
-    # --- INICIO DE LA MEJORA 2: PEDIDOS POR CÓDIGO ---
+    # El código de esta página no ha cambiado
     items_from_db = firebase.get_all_inventory_items()
     
     col1, col2 = st.columns([2, 3])
@@ -551,7 +573,6 @@ elif st.session_state.page == "🛒 Pedidos":
         else:
             total_price = 0
             
-            # Crear un DataFrame para una mejor visualización y edición
             order_df_data = []
             for i, item in enumerate(st.session_state.order_items):
                 order_df_data.append({
@@ -564,12 +585,11 @@ elif st.session_state.page == "🛒 Pedidos":
             
             order_df = pd.DataFrame(order_df_data)
 
-            # Mostrar la tabla editable
             st.write("Puedes editar la cantidad directamente en la tabla:")
             edited_df = st.data_editor(
                 order_df,
                 column_config={
-                    "id": None, # Ocultar la columna de ID
+                    "id": None,
                     "Producto": st.column_config.TextColumn(disabled=True),
                     "Cantidad": st.column_config.NumberColumn(min_value=1, step=1),
                     "Precio Unit.": st.column_config.NumberColumn(format="$%.2f", disabled=True),
@@ -580,13 +600,11 @@ elif st.session_state.page == "🛒 Pedidos":
                 key="order_editor"
             )
 
-            # Sincronizar cambios de la tabla al estado de sesión
             if 'edited_rows' in st.session_state.order_editor:
                 for idx, changes in st.session_state.order_editor['edited_rows'].items():
                     item_id = st.session_state.order_items[idx]['id']
                     st.session_state.order_items[idx]['order_quantity'] = changes.get('Cantidad', st.session_state.order_items[idx]['order_quantity'])
 
-            # Recalcular el precio total
             total_price = sum(item.get('sale_price', 0) * item['order_quantity'] for item in st.session_state.order_items)
             
             st.metric("Precio Total del Pedido", f"${total_price:,.2f}")
@@ -604,7 +622,6 @@ elif st.session_state.page == "🛒 Pedidos":
                     send_whatsapp_alert(f"🧾 Nuevo Pedido: {final_title} por ${total_price:,.2f}")
                     st.session_state.order_items = []; st.rerun()
 
-    # --- FIN DE LA MEJORA 2 ---
     st.markdown("---")
     st.subheader("⏳ Pedidos en Proceso")
     processing_orders = firebase.get_orders('processing')
@@ -733,22 +750,53 @@ elif st.session_state.page == "📊 Analítica":
                         except Exception as e:
                             st.error(f"No se pudo generar la predicción: {e}")
 
-elif st.session_state.page == "👥 Acerca de":
-    # El código de esta página no ha cambiado
-    st.header("Sobre el Proyecto y sus Creadores")
-    with st.container(border=True):
-        col_img_est, col_info_est = st.columns([1, 3])
-        with col_img_est:
-            st.image("https://avatars.githubusercontent.com/u/129755299?v=4", width=200, caption="Joseph Javier Sánchez Acuña")
-        with col_info_est:
-            st.title("Joseph Javier Sánchez Acuña")
-            st.subheader("Estudiante de Ingeniería Industrial")
-            st.subheader("Experto en Inteligencia Artificial y Desarrollo de Software.")
-            st.markdown(
-                """
-                - **LinkedIn:** [joseph-javier-sánchez-acuña](https://www.linkedin.com/in/joseph-javier-sánchez-acuña-150410275)
-                - **GitHub:** [GIUSEPPESAN21](https://github.com/GIUSEPPESAN21)
-                - **Email:** [joseph.sanchez@uniminuto.edu.co](mailto:joseph.sanchez@uniminuto.edu.co)
-                """
-            )
+elif st.session_state.page == "🏢 Acerca de SAVA":
+    # --- MEJORA DE INTERFAZ: Nueva Página "Acerca de" ---
+    st.image("https://cdn-icons-png.flaticon.com/512/8128/8128087.png", width=150)
+    st.title("Sobre SAVA")
+    st.subheader("Innovación y Tecnología para el Retail del Futuro")
+    
+    st.markdown("""
+    En **SAVA**, somos pioneros en el desarrollo de soluciones de software que fusionan la inteligencia artificial
+    con las necesidades reales del sector retail. Nuestra misión es empoderar a los negocios con herramientas
+    poderosas, intuitivas y eficientes que transformen sus operaciones y potencien su crecimiento.
+    
+    Creemos que la tecnología debe ser un aliado, no un obstáculo. Por eso, diseñamos **OSIRIS** pensando
+    en la agilidad, la precisión y la facilidad de uso.
+    """)
+    
+    st.markdown("---")
+    
+    st.subheader("Nuestro Equipo Fundador")
+    
+    # Perfil del CEO
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        st.image("https://avatars.githubusercontent.com/u/129755299?v=4", width=150, caption="CEO")
+    with col2:
+        st.markdown("#### Joseph Sánchez Acuña")
+        st.markdown("**CEO y Arquitecto de Software**")
+        st.write("""
+        Líder visionario con una profunda experiencia en inteligencia artificial y desarrollo de software.
+        Joseph es el cerebro detrás de la arquitectura de OSIRIS, impulsando la innovación
+        y asegurando que nuestra tecnología se mantenga a la vanguardia.
+        """)
+        st.markdown(
+            """
+            - **LinkedIn:** [joseph-javier-sánchez-acuña](https://www.linkedin.com/in/joseph-javier-sánchez-acuña-150410275)
+            - **GitHub:** [GIUSEPPESAN21](https://github.com/GIUSEPPESAN21)
+            """
+        )
+    st.markdown("---")
+    
+    # Perfiles de Cofundadores (puedes añadir más siguiendo el mismo patrón)
+    st.markdown("##### Cofundadores")
+    
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.info("**Nombre del Socio 1**\n\n*Director de Operaciones*")
+    with c2:
+        st.info("**Nombre del Socio 2**\n\n*Director de Tecnología*")
+    with c3:
+        st.info("**Nombre del Socio 3**\n\n*Directora Comercial*")
 
